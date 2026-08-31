@@ -3,6 +3,7 @@ package com.pulseops.metric;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 
+import com.pulseops.MySqlTestcontainersConfiguration;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HashSet;
@@ -17,6 +18,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.context.TestPropertySource;
 import org.testcontainers.containers.GenericContainer;
@@ -32,9 +34,12 @@ import org.testcontainers.utility.DockerImageName;
  * <p>
  * Kafka는 띄우지 않는다. 저장 결과를 보는 테스트가 Broker 유무에 좌우되면 안 된다.
  * <p>
+ * MySQL은 Context에 Datasource가 있어 함께 띄운다. {@link MySqlTestcontainersConfiguration} 참고.
+ * <p>
  * Docker가 필요하며 Docker를 사용할 수 없으면 자동으로 건너뛴다.
  */
 @Testcontainers(disabledWithoutDocker = true)
+@Import(MySqlTestcontainersConfiguration.class)
 @SpringBootTest
 @TestPropertySource(properties = "spring.kafka.listener.auto-startup=false")
 class RedisMetricStoreIntegrationTest {

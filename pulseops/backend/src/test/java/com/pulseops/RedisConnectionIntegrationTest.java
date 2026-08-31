@@ -12,6 +12,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
 import org.springframework.data.redis.connection.RedisConnection;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.RedisCallback;
@@ -31,9 +32,12 @@ import org.testcontainers.utility.DockerImageName;
  * Kafka Listener는 시작하지 않는다. Redis 연결을 보는 테스트가 Broker 유무에 좌우되면 안 되기
  * 때문이며, 실제 Broker 연동은 Kafka Integration Test가 따로 담당한다.
  * <p>
+ * MySQL은 Context에 Datasource가 있어 함께 띄운다. {@link MySqlTestcontainersConfiguration} 참고.
+ * <p>
  * Docker가 필요하며 Docker를 사용할 수 없으면 자동으로 건너뛴다.
  */
 @Testcontainers(disabledWithoutDocker = true)
+@Import(MySqlTestcontainersConfiguration.class)
 @SpringBootTest
 @TestPropertySource(properties = "spring.kafka.listener.auto-startup=false")
 class RedisConnectionIntegrationTest {

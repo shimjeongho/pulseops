@@ -7,6 +7,7 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.AppenderBase;
+import com.pulseops.MySqlTestcontainersConfiguration;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -42,6 +43,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.kafka.config.TopicBuilder;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -66,9 +68,12 @@ import tools.jackson.databind.node.ObjectNode;
  * 각 검증은 자신이 보낸 Record의 partition과 offset으로 해당 log를 찾는다. 모든 테스트가 하나의
  * Topic과 하나의 Consumer를 공유하지만 실행 순서에 의존하지 않는 이유이다.
  * <p>
+ * MySQL은 Context에 Datasource가 있어 함께 띄운다. {@link MySqlTestcontainersConfiguration} 참고.
+ * <p>
  * Docker가 필요하며 Docker를 사용할 수 없으면 자동으로 건너뛴다.
  */
 @Testcontainers(disabledWithoutDocker = true)
+@Import(MySqlTestcontainersConfiguration.class)
 @SpringBootTest
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class TelemetryKafkaConsumerIntegrationTest {

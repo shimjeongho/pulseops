@@ -3,6 +3,7 @@ package com.pulseops.telemetry;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
+import com.pulseops.MySqlTestcontainersConfiguration;
 import com.pulseops.metric.MetricSeries;
 import com.pulseops.metric.MetricSnapshot;
 import com.pulseops.metric.MetricWindow;
@@ -35,6 +36,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.kafka.config.TopicBuilder;
@@ -60,9 +62,12 @@ import tools.jackson.databind.node.ObjectNode;
  * 각 검증은 자기만의 계열과 eventId를 쓰고 자기가 만든 Key만 지운다. 그래서 하나의 Topic과 하나의
  * Consumer를 공유해도 실행 순서에 의존하지 않는다.
  * <p>
+ * MySQL은 Context에 Datasource가 있어 함께 띄운다. {@link MySqlTestcontainersConfiguration} 참고.
+ * <p>
  * Docker가 필요하며 Docker를 사용할 수 없으면 자동으로 건너뛴다.
  */
 @Testcontainers(disabledWithoutDocker = true)
+@Import(MySqlTestcontainersConfiguration.class)
 @SpringBootTest
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class TelemetryKafkaRedisIntegrationTest {
