@@ -10,18 +10,12 @@ public class InsufficientStockException extends RuntimeException {
 
 	private final String productName;
 
-	private final int requestedQuantity;
-
-	private final int availableQuantity;
-
 	public InsufficientStockException(Long productId, String productName, int requestedQuantity,
 			int availableQuantity) {
 		super("Insufficient stock for product " + productId + ": requested " + requestedQuantity + ", available "
 				+ availableQuantity);
 		this.productId = productId;
 		this.productName = productName;
-		this.requestedQuantity = requestedQuantity;
-		this.availableQuantity = availableQuantity;
 	}
 
 	public Long getProductId() {
@@ -30,14 +24,6 @@ public class InsufficientStockException extends RuntimeException {
 
 	public String getProductName() {
 		return this.productName;
-	}
-
-	public int getRequestedQuantity() {
-		return this.requestedQuantity;
-	}
-
-	public int getAvailableQuantity() {
-		return this.availableQuantity;
 	}
 
 }

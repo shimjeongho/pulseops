@@ -1,16 +1,46 @@
-# React + Vite
+# Demo Shop Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+PulseOps 관측 대상 애플리케이션인 Demo Shop의 화면이다.
 
-Currently, two official plugins are available:
+상품 조회부터 장바구니, 주문 생성, 가상 결제까지의 흐름을 제공한다.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+장바구니는 Browser localStorage에만 존재하며 화면 표시용이다. 주문 금액과 결제 금액은 항상 백엔드가 결정한다.
 
-## React Compiler
+## 요구 환경
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- Node.js 20 이상
+- Demo Shop Backend가 `http://localhost:8080`에서 실행 중이어야 한다
 
-## Expanding the Oxlint configuration
+## 설치
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+```
+npm ci
+```
+
+## 실행
+
+```
+npm run dev
+```
+
+Vite Dev Server가 `http://localhost:5173`에서 뜬다.
+
+## Build
+
+```
+npm run build
+```
+
+## Lint
+
+```
+npm run lint
+```
+
+## Backend 연동
+
+이 프로젝트는 API 주소를 하드코딩하지 않고 `/api/products`처럼 상대 경로로만 호출한다.
+
+`vite.config.js`에서 `/api` 요청을 `http://localhost:8080`으로 Proxy하므로 브라우저 입장에서는 단일 Origin이며, 백엔드에 별도의 CORS 설정이 필요 없다.
+
+Proxy는 Dev Server 설정이므로 `npm run dev`로 실행할 때만 동작한다. 백엔드가 떠 있지 않으면 화면에 연결 실패 안내가 표시된다.
