@@ -6,6 +6,7 @@ import com.pulseops.demoshop.order.OrderNotFoundException;
 import com.pulseops.demoshop.product.InsufficientStockException;
 import com.pulseops.demoshop.product.ProductInactiveException;
 import com.pulseops.demoshop.product.ProductNotFoundException;
+import com.pulseops.demoshop.telemetry.TelemetryAttributes;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.Comparator;
 import java.util.List;
@@ -70,11 +71,17 @@ public class GlobalExceptionHandler {
 			.toList();
 		ErrorResponse body = ErrorResponse.of(HttpStatus.BAD_REQUEST.value(), "VALIDATION_ERROR",
 				"요청 값이 올바르지 않습니다.", request.getRequestURI(), fieldErrors);
+		TelemetryAttributes.setError(request, body.code(), body.message());
 		return ResponseEntity.badRequest().body(body);
 	}
 
+	/**
+	 * 이 Class가 확정한 Error Code와 message를 Telemetry가 그대로 읽어 갈 수 있도록 Request에
+	 * 남긴다. 응답 본문은 달라지지 않으며 HTTP 오류 매핑의 소유자도 계속 이 Class 하나다.
+	 */
 	private ResponseEntity<ErrorResponse> build(HttpStatus status, String code, String message,
 			HttpServletRequest request) {
+		TelemetryAttributes.setError(request, code, message);
 		return ResponseEntity.status(status)
 			.body(ErrorResponse.of(status.value(), code, message, request.getRequestURI()));
 	}
