@@ -2,7 +2,10 @@ package com.pulseops.telemetry;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.mockito.BDDMockito.then;
+import static org.mockito.Mockito.mock;
 
+import com.pulseops.metric.MetricRecorder;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -11,6 +14,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.json.JsonTest;
 import org.springframework.boot.test.system.CapturedOutput;
@@ -46,11 +50,14 @@ class TelemetryEventListenerTest {
 	@Autowired
 	private ObjectMapper objectMapper;
 
+	private final MetricRecorder metricRecorder = mock(MetricRecorder.class);
+
 	private TelemetryEventListener listener;
 
 	@BeforeEach
 	void createListener() {
-		this.listener = new TelemetryEventListener(this.objectMapper, new TelemetryEventValidator());
+		this.listener = new TelemetryEventListener(this.objectMapper, new TelemetryEventValidator(),
+				this.metricRecorder);
 	}
 
 	@Test
@@ -151,6 +158,36 @@ class TelemetryEventListenerTest {
 			.doesNotContain("ORDER_ALREADY_PAID")
 			.doesNotContain("3f1c8a27-6b90-4d1e-9c44-72b0d5e19a2b")
 			.contains("payloadLength=" + payload.length());
+	}
+
+	/**
+	 * 검증을 통과한 Event만 집계로 넘어간다. Listener가 Event를 두 번 넘기면 한 번 일어난 요청이 두 번
+	 * 세어지고, Redis dedup은 같은 eventId를 한 번만 받으므로 그 중복을 걸러 주지 못한다.
+	 */
+	@Test
+	void handsAValidEventToTheMetricRecorderOnce() throws IOException {
+		consume(readCanonicalFixture());
+
+		ArgumentCaptor<TelemetryEvent> recorded = ArgumentCaptor.forClass(TelemetryEvent.class);
+		then(this.metricRecorder).should().record(recorded.capture());
+		assertThat(recorded.getValue().eventId()).isEqualTo("3f1c8a27-6b90-4d1e-9c44-72b0d5e19a2b");
+		assertThat(recorded.getValue().httpStatus()).isEqualTo(409);
+	}
+
+	/**
+	 * 계약을 어긴 Event가 집계에 닿으면 Metric이 실제로 일어나지 않은 요청까지 세게 된다. 집계 창이나
+	 * 오류 판정 이전에, 계약 검증을 지난 Event만 넘어간다는 것이 이 경계의 계약이다.
+	 */
+	@Test
+	void neverHandsAnInvalidEventToTheMetricRecorder() throws IOException {
+		consume(null);
+		consume("{not-json");
+		consume(canonicalPayloadWith((payload) -> payload.put("schemaVersion", 2)));
+		consume(canonicalPayloadWith((payload) -> payload.remove("httpStatus")));
+		consume(canonicalPayloadWith((payload) -> payload.put("latencyMs", -1)));
+		consume(canonicalPayloadWith((payload) -> payload.put("endpoint", "  ")));
+
+		then(this.metricRecorder).shouldHaveNoInteractions();
 	}
 
 	private void consume(String payload) {

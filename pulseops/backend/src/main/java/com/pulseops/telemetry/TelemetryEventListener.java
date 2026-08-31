@@ -1,5 +1,6 @@
 package com.pulseops.telemetry;
 
+import com.pulseops.metric.MetricRecorder;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,6 +21,9 @@ import tools.jackson.databind.ObjectMapper;
  * 계약을 어긴 Event 때문에 예외를 밖으로 던지지 않는다. 같은 offset이 계속 재전달되어 Consumer가
  * 정체되는 구조를 만들지 않기 위한 것이며, 잘못된 Event는 현재 offset에서 처리 완료로 본다.
  * 반대로 예상하지 못한 오류는 삼키지 않고 그대로 올려 보내 관측 결함이 조용히 묻히지 않게 한다.
+ * <p>
+ * 계약을 지킨 Event는 {@link MetricRecorder}에 넘긴다. 집계에 넣을 Event인지, 어떤 값으로 넣을지는
+ * 그쪽이 정하므로 여기서는 판단하지 않는다.
  */
 @Component
 public class TelemetryEventListener {
@@ -33,9 +37,13 @@ public class TelemetryEventListener {
 
 	private final TelemetryEventValidator validator;
 
-	public TelemetryEventListener(ObjectMapper objectMapper, TelemetryEventValidator validator) {
+	private final MetricRecorder metricRecorder;
+
+	public TelemetryEventListener(ObjectMapper objectMapper, TelemetryEventValidator validator,
+			MetricRecorder metricRecorder) {
 		this.objectMapper = objectMapper;
 		this.validator = validator;
+		this.metricRecorder = metricRecorder;
 	}
 
 	@KafkaListener(topics = TOPIC)
@@ -68,6 +76,7 @@ public class TelemetryEventListener {
 		logger.debug("Telemetry Event topic={} partition={} offset={} eventId={} service={} endpoint={} httpStatus={} latencyMs={}",
 				record.topic(), record.partition(), record.offset(), event.eventId(), event.service(),
 				event.endpoint(), event.httpStatus(), event.latencyMs());
+		this.metricRecorder.record(event);
 	}
 
 	/**
