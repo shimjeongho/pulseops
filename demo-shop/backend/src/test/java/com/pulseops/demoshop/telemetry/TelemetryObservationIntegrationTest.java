@@ -35,8 +35,9 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.kafka.KafkaException;
 import org.springframework.test.context.TestPropertySource;
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -44,8 +45,9 @@ import org.springframework.web.servlet.HandlerMapping;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * Demo Shop의 HTTP Request가 공통 계층에서 어떤 Telemetry Event로 관측되는지 검증한다. Kafka는
- * 아직 없으므로 TelemetryPublisher를 Spy로 감싸 발행 결과를 직접 확인한다.
+ * Demo Shop의 HTTP Request가 공통 계층에서 어떤 Telemetry Event로 관측되는지 검증한다.
+ * TelemetryPublisher는 Mock으로 대체한다. 여기서 확인할 것은 Filter가 만들어 낸 Event 자체이고,
+ * Kafka 전송은 TelemetryPublisherTest와 Kafka Integration Test가 따로 책임지기 때문이다.
  * <p>
  * Route Template과 Business Error Code는 실제 Handler Mapping과 GlobalExceptionHandler가
  * 결정하므로 Mock Controller가 아니라 실제 API를 호출한다.
@@ -55,7 +57,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @Import(TestcontainersConfiguration.class)
 @AutoConfigureMockMvc
 @SpringBootTest
-@TestPropertySource(properties = "pulseops.telemetry.service-instance=demo-shop-test-01")
+@TestPropertySource(properties = { "pulseops.telemetry.enabled=true",
+		"pulseops.telemetry.service-instance=demo-shop-test-01", "spring.kafka.admin.auto-create=false" })
 class TelemetryObservationIntegrationTest {
 
 	private static final String SERVICE_INSTANCE = "demo-shop-test-01";
@@ -78,7 +81,7 @@ class TelemetryObservationIntegrationTest {
 	@Autowired
 	private MockMvc mockMvc;
 
-	@MockitoSpyBean
+	@MockitoBean
 	private TelemetryPublisher telemetryPublisher;
 
 	@Value("${spring.application.name}")
@@ -334,7 +337,7 @@ class TelemetryObservationIntegrationTest {
 	 */
 	@Test
 	void publisherFailureLeavesTheHttpResponseUnchanged() throws Exception {
-		doThrow(new IllegalStateException("Telemetry 발행 실패")).when(this.telemetryPublisher).publish(any());
+		doThrow(new KafkaException("Broker로 전송하지 못했다.")).when(this.telemetryPublisher).publish(any());
 
 		this.mockMvc.perform(get("/api/products/{productId}", SEEDED_ACTIVE_PRODUCT_ID))
 			.andExpect(status().isOk())
