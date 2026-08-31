@@ -149,6 +149,10 @@ endpoint는 실제 resource ID가 아닌 route template 형태를 사용한다.
 
 Kafka Event 소비 과정에서는 동일 eventId가 반복 전달될 수 있다고 가정한다.
 
+Consumer 처리는 at-least-once 성격이며 중복 반영은 Redis dedup으로 막는다.
+
+Producer는 발행 실패 시 요청을 살리는 fail-open이고 Redis 장애 구간의 Event는 집계에서 빠질 수 있으므로 end-to-end exactly-once가 아니다.
+
 ---
 
 ## 6. Database Rules
@@ -188,6 +192,15 @@ Redis는 다음 용도로 사용한다.
 Redis를 단순히 기술 스택에 포함하기 위한 Cache로 사용하지 않는다.
 
 영구 보존이 필요한 데이터의 유일한 저장소로 Redis를 사용하지 않는다.
+
+Phase 3에서 확정한 Metric 계약은 다음과 같으며 이후 Phase에서 임의로 바꾸지 않는다.
+
+- Metric Error는 httpStatus 500 이상이며 4xx는 requestCount에만 포함한다
+- Bucket은 10초이고 Rolling Window는 6 bucket 60초이다
+- Metric Key TTL은 300초, dedup Key TTL은 900초이다
+- latency 표본은 Bucket당 최근 500개만 남긴다
+- Redis 쓰기 실패는 WARN 후 건너뛰며 Kafka 소비를 멈추지 않는다
+- Redis 읽기 실패는 빈 Metric으로 바꾸지 않고 그대로 올려 보낸다
 
 ---
 
