@@ -5,7 +5,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.time.Instant;
+import java.util.HexFormat;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,6 +29,14 @@ import tools.jackson.databind.node.ObjectNode;
 class TelemetryEventContractTest {
 
 	private static final String FIXTURE_PATH = "telemetry/telemetry-event-v1.json";
+
+	/**
+	 * Demo Shop 쪽 같은 fixture의 위치이다. Gradle 테스트는 각 Project 디렉터리에서 실행되므로
+	 * Repository 안에서 이 상대 경로는 고정이다. 두 Project를 multi-project로 묶거나 공용 resource
+	 * module을 만들지 않기 위해 Build가 아니라 이 검증으로 두 파일이 갈라지는 것을 막는다.
+	 */
+	private static final Path DEMO_SHOP_FIXTURE = Path
+		.of("../../demo-shop/backend/src/test/resources/telemetry/telemetry-event-v1.json");
 
 	private static final List<String> V1_FIELDS = List.of("eventId", "schemaVersion", "occurredAt", "service",
 			"serviceInstance", "requestId", "method", "endpoint", "httpStatus", "success", "latencyMs", "errorType",
@@ -103,6 +115,26 @@ class TelemetryEventContractTest {
 
 		assertThat(event.schemaVersion()).isEqualTo(1);
 		assertThat(event.endpoint()).isEqualTo("/api/payments");
+	}
+
+	/**
+	 * Demo Shop과 PulseOps는 Java Model을 공유하지 않고 이 JSON 하나로만 연결된다. 두 파일이 조용히
+	 * 갈라지면 각자의 계약 테스트는 그대로 통과하면서 실제 연동만 깨지므로, 내용이 완전히 같은지를
+	 * 확인한다.
+	 */
+	@Test
+	void isByteIdenticalToTheDemoShopFixture() throws Exception {
+		assertThat(DEMO_SHOP_FIXTURE).exists();
+
+		byte[] demoShopFixture = Files.readAllBytes(DEMO_SHOP_FIXTURE);
+		byte[] pulseOpsFixture = readCanonicalFixture().getBytes(StandardCharsets.UTF_8);
+
+		assertThat(pulseOpsFixture).isEqualTo(demoShopFixture);
+		assertThat(sha256(pulseOpsFixture)).isEqualTo(sha256(demoShopFixture));
+	}
+
+	private String sha256(byte[] content) throws Exception {
+		return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content));
 	}
 
 	private ObjectNode canonicalPayload() throws IOException {
