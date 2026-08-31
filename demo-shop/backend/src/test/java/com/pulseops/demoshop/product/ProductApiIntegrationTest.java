@@ -20,9 +20,9 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * Product API against a real MySQL 8.4 container, so the Flyway migrations and the JPA
- * mapping are exercised exactly as they would be at runtime.
- * Requires Docker; skipped automatically when Docker is unavailable.
+ * 실제 MySQL 8.4 Container를 대상으로 Product API를 검증한다. Flyway Migration과 JPA Mapping을
+ * 실제 실행 환경과 동일하게 확인한다.
+ * Docker가 필요하며 Docker를 사용할 수 없으면 자동으로 건너뛴다.
  */
 @Testcontainers(disabledWithoutDocker = true)
 @Import(TestcontainersConfiguration.class)
@@ -86,7 +86,7 @@ class ProductApiIntegrationTest {
 			.andExpect(jsonPath("$[0].price").isNumber())
 			.andExpect(jsonPath("$[0].stockQuantity").isNumber())
 			.andExpect(jsonPath("$[0].status").value("ACTIVE"))
-			// the summary DTO must not leak fields it does not declare
+			// 목록용 DTO는 선언하지 않은 필드를 노출해서는 안 된다
 			.andExpect(jsonPath("$[0].description").doesNotExist())
 			.andExpect(jsonPath("$[0].createdAt").doesNotExist())
 			.andExpect(jsonPath("$[0].updatedAt").doesNotExist());
@@ -118,7 +118,7 @@ class ProductApiIntegrationTest {
 			.andExpect(jsonPath("$.path").value("/api/products/999999"))
 			.andExpect(jsonPath("$.fieldErrors", hasSize(0)))
 			.andExpect(jsonPath("$.timestamp").isString())
-			// no stack trace must reach the client
+			// Stack Trace가 클라이언트에 노출되어서는 안 된다
 			.andExpect(jsonPath("$.trace").doesNotExist())
 			.andExpect(jsonPath("$.stackTrace").doesNotExist())
 			.andReturn()

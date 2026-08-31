@@ -5,7 +5,7 @@ import jakarta.validation.constraints.NotEmpty;
 import java.util.List;
 
 /**
- * Body of a create-order request. {@code @Valid} cascades validation into each item.
+ * 주문 생성 요청 본문이다. {@code @Valid}가 각 항목까지 Validation을 전파한다.
  */
 public record OrderCreateRequest(@NotEmpty @Valid List<OrderItemRequest> items) {
 

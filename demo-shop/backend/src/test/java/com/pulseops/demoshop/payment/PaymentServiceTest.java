@@ -31,9 +31,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
 /**
- * The payment rules on their own, with the repositories stubbed. The database-level
- * guarantees these rules lean on — the transaction and the row locks — are covered by
- * {@code PaymentApiIntegrationTest} and {@code PaymentConcurrencyIntegrationTest}.
+ * Repository를 Stub으로 대체하고 결제 규칙 자체만 검증한다. 이 규칙이 기대는 데이터베이스 수준
+ * 보장인 Transaction과 행 잠금은 {@code PaymentApiIntegrationTest}와
+ * {@code PaymentConcurrencyIntegrationTest}에서 검증한다.
  */
 class PaymentServiceTest {
 
@@ -56,7 +56,7 @@ class PaymentServiceTest {
 			.willAnswer((invocation) -> invocation.getArgument(0));
 	}
 
-	// --- successful payment -------------------------------------------------
+	// --- 결제 성공 ----------------------------------------------------------
 
 	@Test
 	void paysForAPendingOrder() {
@@ -157,14 +157,14 @@ class PaymentServiceTest {
 		verify(this.productRepository, never()).findById(anyLong());
 	}
 
-	// --- price changes after the order --------------------------------------
+	// --- 주문 이후 가격 변경 ------------------------------------------------
 
 	@Test
 	void chargesTheOrderTotalEvenAfterTheProductPriceHasChanged() {
 		Product keyboard = product(1L, "Mechanical Keyboard 87-Key", "129000.00", 42);
 		Order order = pendingOrder(100L, item(keyboard, 2));
 		BigDecimal totalWhenOrdered = order.getTotalAmount();
-		// the shop re-prices the product long after the order was placed
+		// 주문이 생성되고 한참 뒤에 상품 가격이 변경된 상황을 가정한다
 		ReflectionTestUtils.setField(keyboard, "price", new BigDecimal("999000.00"));
 		stub(order, keyboard);
 
@@ -174,7 +174,7 @@ class PaymentServiceTest {
 		assertThat(payment.getAmount()).isEqualByComparingTo("258000.00");
 	}
 
-	// --- rejected payments --------------------------------------------------
+	// --- 결제 거부 ----------------------------------------------------------
 
 	@Test
 	void rejectsPaymentForAnUnknownOrder() {
@@ -247,8 +247,8 @@ class PaymentServiceTest {
 	}
 
 	/**
-	 * The shortage is on the second line, so a flow that deducted as it went would
-	 * already have taken the first product stock by the time it noticed.
+	 * 재고 부족이 두 번째 항목에서 발생하므로, 항목 순서대로 차감하는 구현이라면 부족을 알아챈
+	 * 시점에 이미 첫 번째 상품의 재고를 차감한 뒤일 것이다.
 	 */
 	@Test
 	void takesNoStockAtAllWhenALaterLineIsShort() {
@@ -268,7 +268,7 @@ class PaymentServiceTest {
 		verify(this.paymentRepository, never()).save(any(Payment.class));
 	}
 
-	// --- helpers ------------------------------------------------------------
+	// --- 헬퍼 ---------------------------------------------------------------
 
 	private void stub(Order order, Product... products) {
 		given(this.orderRepository.findByIdWithItems(order.getId())).willReturn(Optional.of(order));

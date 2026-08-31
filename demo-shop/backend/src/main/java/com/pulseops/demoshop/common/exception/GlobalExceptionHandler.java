@@ -16,8 +16,8 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 /**
- * Translates business exceptions into the common error body. Controllers therefore do
- * not catch business exceptions to map them onto HTTP statuses.
+ * Business Exception을 공통 오류 응답 본문으로 변환한다. 따라서 Controller는 HTTP Status를
+ * 매핑하기 위해 Business Exception을 직접 처리하지 않는다.
  */
 @RestControllerAdvice
 public class GlobalExceptionHandler {

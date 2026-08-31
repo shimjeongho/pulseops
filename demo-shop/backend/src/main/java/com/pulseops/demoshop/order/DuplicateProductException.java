@@ -1,8 +1,8 @@
 package com.pulseops.demoshop.order;
 
 /**
- * Raised when one order request lists the same product more than once. Such requests
- * are rejected rather than merged, so the caller resolves the ambiguity.
+ * 하나의 주문 요청에 같은 상품이 두 번 이상 포함된 경우 발생한다. 수량을 임의로 합치지 않고
+ * 요청을 거부하여 호출자가 의도를 명확히 하도록 한다.
  */
 public class DuplicateProductException extends RuntimeException {
 

@@ -4,8 +4,8 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * Common API error body. {@code fieldErrors} is always present so clients can rely on
- * the shape; it is empty for errors that are not about a specific input field.
+ * 공통 API 오류 응답 본문이다. 클라이언트가 응답 형태를 일관되게 다룰 수 있도록
+ * {@code fieldErrors}는 항상 존재하며, 특정 입력 필드와 무관한 오류에서는 빈 목록이다.
  */
 public record ErrorResponse(Instant timestamp, int status, String code, String message, String path,
 		List<String> fieldErrors) {

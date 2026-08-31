@@ -34,10 +34,9 @@ public class OrderService {
 	}
 
 	/**
-	 * Creates an order priced from the server's own product data. The order and all of
-	 * its items are written in one transaction, so a failure part-way leaves nothing
-	 * behind. Product stock is deliberately left untouched: reserving stock belongs to
-	 * payment, not to placing the order.
+	 * 서버가 보관한 상품 데이터를 기준으로 가격을 계산해 주문을 생성한다. 주문과 모든 항목은
+	 * 하나의 Transaction에서 저장되므로 도중에 실패하면 아무것도 남지 않는다. 재고는 의도적으로
+	 * 건드리지 않는다. 재고 확보는 주문이 아니라 결제의 책임이다.
 	 */
 	@Transactional
 	public Order create(OrderCreateRequest request) {

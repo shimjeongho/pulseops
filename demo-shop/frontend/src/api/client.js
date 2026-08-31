@@ -1,10 +1,10 @@
 /**
- * Thin wrapper over fetch for the Demo Shop backend. Every failure — a network
- * problem, a business rejection, an unexpected status — arrives at the caller as an
- * ApiError, so pages have one thing to catch and one shape to render.
+ * Demo Shop 백엔드 호출을 위한 얇은 fetch 래퍼이다. 네트워크 오류, Business 거부, 예상치 못한
+ * 상태 코드 등 모든 실패는 ApiError로 전달되므로, 각 화면은 한 가지 예외만 잡고 한 가지 형태만
+ * 렌더링하면 된다.
  */
 
-/** A failed request, carrying the backend's own error contract where there is one. */
+/** 실패한 요청을 표현한다. 백엔드가 내려준 오류 규약이 있으면 그 값을 그대로 담는다. */
 export class ApiError extends Error {
   constructor({ status, code, message, fieldErrors = [] }) {
     super(message)
@@ -22,7 +22,7 @@ async function readBody(response) {
     const text = await response.text()
     return text ? JSON.parse(text) : null
   } catch {
-    // a non-JSON body (a proxy error page, an empty response) carries nothing useful
+    // JSON이 아닌 본문(프록시 오류 페이지, 빈 응답)에는 쓸 만한 정보가 없다
     return null
   }
 }
@@ -44,7 +44,7 @@ async function request(path, options) {
   if (!response.ok) {
     throw new ApiError({
       status: response.status,
-      // an ErrorResponse from the backend, or a bare status we have to describe ourselves
+      // 백엔드가 내려준 ErrorResponse를 쓰거나, 없으면 직접 설명을 채운다
       code: body?.code ?? 'UNEXPECTED_ERROR',
       message: body?.message ?? GENERIC_MESSAGE,
       fieldErrors: body?.fieldErrors ?? [],

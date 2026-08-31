@@ -13,9 +13,9 @@ import org.springframework.context.annotation.Import;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * Verifies that the Testcontainers MySQL test environment works: the application
- * connects to a real MySQL server and can execute a query.
- * Requires Docker; skipped automatically when Docker is unavailable.
+ * Testcontainers 기반 MySQL 테스트 환경이 동작하는지 검증한다. 애플리케이션이 실제 MySQL
+ * 서버에 연결하여 쿼리를 실행할 수 있어야 한다.
+ * Docker가 필요하며 Docker를 사용할 수 없으면 자동으로 건너뛴다.
  */
 @Testcontainers(disabledWithoutDocker = true)
 @Import(TestcontainersConfiguration.class)

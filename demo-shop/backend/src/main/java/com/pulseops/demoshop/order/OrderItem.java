@@ -14,8 +14,8 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 /**
- * A single line of an order. The product is referenced by id only and its name and
- * price are copied in, so later changes to the product do not rewrite past orders.
+ * 주문의 단일 항목이다. 상품은 ID로만 참조하고 이름과 가격은 주문 시점의 값을 복사해 두므로
+ * 이후 상품 정보가 변경되어도 과거 주문 내역은 바뀌지 않는다.
  */
 @Entity
 @Table(name = "order_item")
@@ -48,7 +48,7 @@ public class OrderItem {
 	private LocalDateTime createdAt;
 
 	protected OrderItem() {
-		// for JPA
+		// JPA 전용 기본 생성자
 	}
 
 	public OrderItem(Long productId, String productName, BigDecimal unitPrice, int quantity) {

@@ -26,8 +26,8 @@ export function OrderDetailPage() {
     } catch (failure) {
       setPaymentError(failure)
     } finally {
-      // whether it worked or not, the screen is refreshed from the server rather than
-      // guessed at — a rejected payment must never leave the order looking paid
+      // 성공 여부와 무관하게 화면을 추측하지 않고 서버 상태로 다시 불러온다.
+      // 거부된 결제가 결제 완료처럼 보이는 일이 없어야 한다
       setPaying(false)
       reload()
     }

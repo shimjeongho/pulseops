@@ -80,7 +80,7 @@ class OrderServiceTest {
 		assertThat(item.getProductId()).isEqualTo(1L);
 		assertThat(item.getProductName()).isEqualTo("Mechanical Keyboard 87-Key");
 		assertThat(item.getUnitPrice()).isEqualByComparingTo("129000.00");
-		// the item keeps no reference to the product entity itself
+		// 주문 항목은 Product Entity 자체를 참조하지 않는다
 		assertThat(ReflectionTestUtils.getField(item, "productId")).isEqualTo(1L);
 	}
 
@@ -143,7 +143,7 @@ class OrderServiceTest {
 
 	@Test
 	void allowsOrderingMoreThanAvailableStockForNow() {
-		// stock is not reserved until payment, so ordering beyond stock still succeeds
+		// 재고는 결제 시점에 차감되므로 재고보다 많은 수량을 주문해도 주문 생성은 성공한다
 		Product almostGone = product(4L, "27-inch QHD Monitor", "389000.00", 1, ProductStatus.ACTIVE);
 		given(this.productRepository.findAllById(anyIterable())).willReturn(List.of(almostGone));
 

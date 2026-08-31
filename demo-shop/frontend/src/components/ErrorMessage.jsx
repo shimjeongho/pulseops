@@ -1,9 +1,9 @@
 const FALLBACK_MESSAGE = '요청을 처리하지 못했습니다.'
 
 /**
- * Shows what went wrong using the backend's own message where there is one. Nothing
- * developer-facing — no status codes, stack traces or exception names — reaches the
- * screen; the field errors are the only detail, and they name the caller's own input.
+ * 백엔드가 내려준 메시지가 있으면 그 메시지로 오류를 안내한다. 상태 코드, Stack Trace,
+ * Exception 이름 같은 개발자용 정보는 화면에 노출하지 않는다. 유일한 상세 정보인 필드 오류는
+ * 사용자가 직접 입력한 값에 대한 것이다.
  */
 export function ErrorMessage({ error, children }) {
   if (!error) {

@@ -265,6 +265,18 @@ Claude Code는 요청받은 범위를 넘어 대규모 구조 변경을 임의�
 
 한 Phase의 기능을 구현하면서 다음 Phase 기능을 미리 추가하지 않는다.
 
+### 주석 언어
+
+개발자가 직접 작성하는 코드 주석과 JavaDoc은 한국어를 기본으로 작성한다.
+
+주석은 코드가 무엇을 하는지 반복하기보다 Business Rule, 설계 의도, 제약사항처럼 코드만으로 파악하기 어려운 내용을 설명할 때 작성한다.
+
+Class명, Method명, 변수명, API Endpoint, Error Code 등 코드 식별자는 영어를 유지한다.
+
+외부 Library, Framework, Protocol 등의 고유 명칭은 원문 표기를 유지한다.
+
+불필요한 주석을 추가하지 않는다.
+
 ---
 
 ## 12. Testing Policy

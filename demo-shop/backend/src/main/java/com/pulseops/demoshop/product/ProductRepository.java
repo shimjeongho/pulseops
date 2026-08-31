@@ -9,10 +9,9 @@ import org.springframework.data.jpa.repository.Lock;
 public interface ProductRepository extends JpaRepository<Product, Long> {
 
 	/**
-	 * Loads the given products for update, so concurrent payments for the same product
-	 * are serialised instead of both reading the same stock. The rows are taken in
-	 * ascending id order so that payments touching overlapping sets of products always
-	 * acquire their locks in the same sequence and cannot deadlock against each other.
+	 * 주어진 상품을 쓰기 잠금과 함께 조회한다. 같은 상품에 대한 동시 결제가 같은 재고를 함께 읽지
+	 * 않고 직렬화되도록 하기 위한 것이다. 상품 ID 오름차순으로 조회하므로, 겹치는 상품을 다루는
+	 * 결제들이 항상 같은 순서로 잠금을 획득하여 서로 Deadlock에 빠지지 않는다.
 	 */
 	@Lock(LockModeType.PESSIMISTIC_WRITE)
 	List<Product> findAllByIdInOrderByIdAsc(Collection<Long> ids);

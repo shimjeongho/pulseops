@@ -1,7 +1,7 @@
 package com.pulseops.demoshop.order;
 
 /**
- * Raised when an order lookup finds no order for the requested id.
+ * 요청한 ID에 해당하는 주문이 없을 때 발생한다.
  */
 public class OrderNotFoundException extends RuntimeException {
 

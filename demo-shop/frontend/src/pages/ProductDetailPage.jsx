@@ -36,8 +36,8 @@ function ProductDetail({ product }) {
   const inactive = product.status !== 'ACTIVE'
   const purchasable = !soldOut && !inactive
 
-  // the shop stops the shopper going past what is on the shelf, but the stock that
-  // counts is the one payment checks: this is a convenience, not the rule
+  // 화면에서도 재고를 넘는 수량을 막지만 실제로 유효한 재고는 결제가 확인하는 값이다.
+  // 이 제한은 편의를 위한 것이지 규칙 자체가 아니다
   const maxQuantity = Math.max(product.stockQuantity, 1)
 
   function handleQuantityChange(event) {

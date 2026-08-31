@@ -17,11 +17,11 @@ export function CartPage() {
     setError(null)
     try {
       const order = await createOrder(items)
-      // the cart is only emptied once the server has the order
+      // 서버에 주문이 생성된 뒤에만 장바구니를 비운다
       clear()
       navigate(`/orders/${order.id}`)
     } catch (failure) {
-      // the cart is kept so the shopper can fix whatever was rejected
+      // 거부된 부분을 사용자가 수정할 수 있도록 장바구니를 유지한다
       setError(failure)
       setSubmitting(false)
     }

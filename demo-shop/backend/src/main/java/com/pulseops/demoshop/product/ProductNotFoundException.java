@@ -1,7 +1,7 @@
 package com.pulseops.demoshop.product;
 
 /**
- * Raised when a product lookup finds no product for the requested id.
+ * 요청한 ID에 해당하는 상품이 없을 때 발생한다.
  */
 public class ProductNotFoundException extends RuntimeException {
 

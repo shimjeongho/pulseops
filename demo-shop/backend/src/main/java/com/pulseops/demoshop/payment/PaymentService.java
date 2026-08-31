@@ -39,14 +39,13 @@ public class PaymentService {
 	}
 
 	/**
-	 * Pays for an order: the stock is taken, the order is marked paid and the payment is
-	 * recorded, all inside one transaction. Either all three happen or none does, so a
-	 * paid order can never exist without its payment or without its stock deducted.
+	 * 주문을 결제한다. 재고 차감, 주문 상태 변경, 결제 기록을 하나의 Transaction에서 처리한다.
+	 * 셋 모두 반영되거나 모두 반영되지 않으므로, 결제 기록이나 재고 차감 없이 결제 완료된 주문이
+	 * 남는 일은 없다.
 	 * <p>
-	 * The products are locked for update before anything is checked, so two payments
-	 * racing for the last item of stock are serialised rather than both succeeding. Every
-	 * product is verified before any of them is decreased, so a shortage on the last line
-	 * does not leave the earlier lines already taken.
+	 * 검증에 앞서 상품 행에 쓰기 잠금을 걸어, 마지막 재고를 두고 경합하는 두 결제가 동시에
+	 * 성공하지 않고 직렬화되도록 한다. 또한 어떤 재고도 차감하기 전에 모든 상품을 먼저 검증하므로
+	 * 마지막 항목에서 재고가 부족해도 앞선 항목의 재고가 이미 차감되어 있지 않다.
 	 */
 	@Transactional
 	public Payment pay(PaymentCreateRequest request) {
@@ -70,7 +69,7 @@ public class PaymentService {
 			}
 		});
 
-		// every line is known to be coverable by this point, so nothing can fail half-way
+		// 이 시점에는 모든 항목의 재고가 충분함이 확인되었으므로 차감 도중 실패할 수 없다
 		quantitiesByProductId.forEach((productId, quantity) -> lockedProducts.get(productId).decreaseStock(quantity));
 
 		order.markPaid();
@@ -78,8 +77,8 @@ public class PaymentService {
 	}
 
 	/**
-	 * Keyed by product id in ascending order, so the products are always locked in the
-	 * same sequence no matter how the order's lines happen to be arranged.
+	 * 상품 ID 오름차순으로 정렬해 반환한다. 주문 항목이 어떤 순서로 들어오든 항상 같은 순서로
+	 * 잠금을 획득하게 하기 위한 것이다.
 	 */
 	private SortedMap<Long, Integer> quantitiesByProductId(Order order) {
 		SortedMap<Long, Integer> quantities = new TreeMap<>();

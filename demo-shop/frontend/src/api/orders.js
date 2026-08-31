@@ -1,8 +1,8 @@
 import { getJson, postJson } from './client.js'
 
 /**
- * Places an order. Only the product and how many of it are sent: the backend prices
- * the order from its own product data, so nothing the cart shows is trusted here.
+ * 주문을 생성한다. 상품과 수량만 전송한다. 백엔드가 자신의 상품 데이터로 주문 금액을
+ * 계산하므로 장바구니에 표시된 값은 신뢰하지 않는다.
  */
 export function createOrder(items) {
   const payload = {

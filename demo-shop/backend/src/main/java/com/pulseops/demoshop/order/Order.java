@@ -20,9 +20,9 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * A customer order. The order is the aggregate root: its items are stored and removed
- * with it, and the total is derived from the item subtotals rather than supplied by the
- * client. The schema is owned by Flyway.
+ * 고객의 주문이다. Order가 Aggregate Root이며 OrderItem은 Order와 생명주기를 함께한다.
+ * 총 금액은 클라이언트가 보낸 값이 아니라 각 항목의 소계를 합산해 계산한다.
+ * Schema는 Flyway가 관리한다.
  */
 @Entity
 @Table(name = "orders")
@@ -53,7 +53,7 @@ public class Order {
 	private List<OrderItem> items = new ArrayList<>();
 
 	protected Order() {
-		// for JPA
+		// JPA 전용 기본 생성자
 	}
 
 	public Order(String orderNumber, List<OrderItem> items) {
@@ -73,8 +73,8 @@ public class Order {
 	}
 
 	/**
-	 * Records that this order has been paid for. Only an order still awaiting payment
-	 * can make the move, so a second payment cannot quietly overwrite the first.
+	 * 주문을 결제 완료 상태로 기록한다. 결제 대기 상태인 주문만 전이할 수 있으므로
+	 * 두 번째 결제가 앞선 결제 결과를 조용히 덮어쓰는 일이 발생하지 않는다.
 	 */
 	public void markPaid() {
 		if (this.status != OrderStatus.PENDING_PAYMENT) {

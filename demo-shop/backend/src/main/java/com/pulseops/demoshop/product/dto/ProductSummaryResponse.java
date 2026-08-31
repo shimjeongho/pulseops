@@ -5,7 +5,7 @@ import com.pulseops.demoshop.product.ProductStatus;
 import java.math.BigDecimal;
 
 /**
- * Product representation used by the list endpoint.
+ * 상품 목록 조회 Endpoint에서 사용하는 상품 표현이다.
  */
 public record ProductSummaryResponse(Long id, String name, BigDecimal price, int stockQuantity,
 		ProductStatus status) {

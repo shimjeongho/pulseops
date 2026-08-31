@@ -39,10 +39,10 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * Payment API against a real MySQL 8.4 container, exercising the V4 migration, the
- * payment transaction and the error contract as they behave at runtime. Every test
- * creates its own products, so one test cannot exhaust the stock another relies on.
- * Requires Docker; skipped automatically when Docker is unavailable.
+ * 실제 MySQL 8.4 Container를 대상으로 Payment API를 검증한다. V4 Migration, 결제 Transaction,
+ * 오류 응답 규약을 실제 실행 환경과 동일하게 확인한다. 각 테스트는 자신이 쓸 상품을 직접
+ * 생성하므로 한 테스트가 다른 테스트가 의존하는 재고를 소진시키지 않는다.
+ * Docker가 필요하며 Docker를 사용할 수 없으면 자동으로 건너뛴다.
  */
 @Testcontainers(disabledWithoutDocker = true)
 @Import(TestcontainersConfiguration.class)
@@ -67,15 +67,15 @@ class PaymentApiIntegrationTest {
 	private OrderService orderService;
 
 	/**
-	 * The products created here are removed again so that tests elsewhere, which count
-	 * the seeded catalogue, still see exactly what the seed migration inserted.
+	 * 여기서 생성한 상품은 다시 제거한다. 초기 데이터 개수를 확인하는 다른 테스트가 Seed
+	 * Migration이 삽입한 데이터만 보도록 하기 위한 것이다.
 	 */
 	@AfterEach
 	void removeProductsCreatedByThisTest() {
 		this.jdbcTemplate.update("DELETE FROM product WHERE name LIKE ?", TEST_PRODUCT_PREFIX + "%");
 	}
 
-	// --- migrations ---------------------------------------------------------
+	// --- Migration ----------------------------------------------------------
 
 	@Test
 	void flywayAppliesAllFourMigrations() {
@@ -103,8 +103,8 @@ class PaymentApiIntegrationTest {
 	}
 
 	/**
-	 * An order may be paid for in more than one attempt, so the foreign key must not be
-	 * backed by a unique index that would allow only one payment row per order.
+	 * 하나의 주문에 여러 번의 결제 시도가 있을 수 있으므로, 외래 키가 주문당 결제 행을 하나로
+	 * 제한하는 Unique Index로 뒷받침되어서는 안 된다.
 	 */
 	@Test
 	void paymentOrderIdIsNotUnique() {
@@ -130,7 +130,7 @@ class PaymentApiIntegrationTest {
 		assertThat(paymentCountFor(orderId)).isZero();
 	}
 
-	// --- successful payment -------------------------------------------------
+	// --- 결제 성공 ----------------------------------------------------------
 
 	@Test
 	void paysForAPendingOrder() throws Exception {
@@ -187,8 +187,8 @@ class PaymentApiIntegrationTest {
 	}
 
 	/**
-	 * Placing the order leaves the shelf alone; only the payment takes stock off it.
-	 * This is the Phase 1-3 rule and the Phase 1-4 rule seen in one run.
+	 * 주문 생성은 재고를 건드리지 않고 결제만 재고를 차감한다.
+	 * Phase 1-3 규칙과 Phase 1-4 규칙을 한 번의 흐름에서 함께 확인한다.
 	 */
 	@Test
 	void takesStockAtPaymentAndNotAtOrderCreation() throws Exception {
@@ -237,7 +237,7 @@ class PaymentApiIntegrationTest {
 		assertThat(first).isNotEqualTo(second);
 	}
 
-	// --- order state failures -----------------------------------------------
+	// --- 주문 상태 오류 -----------------------------------------------------
 
 	@Test
 	void rejectsPaymentForAnUnknownOrderWithNotFound() throws Exception {
@@ -266,7 +266,7 @@ class PaymentApiIntegrationTest {
 		assertThat(statusOfOrder(orderId)).isEqualTo("PAID");
 	}
 
-	// --- stock failures -----------------------------------------------------
+	// --- 재고 부족 ----------------------------------------------------------
 
 	@Test
 	void rejectsPaymentWhenStockIsShortWithConflict() throws Exception {
@@ -289,8 +289,8 @@ class PaymentApiIntegrationTest {
 	}
 
 	/**
-	 * The shortage is on the second line of the order. The transaction must leave the
-	 * first product untouched rather than deducting it and rolling back only in part.
+	 * 재고 부족이 주문의 두 번째 항목에서 발생한다. Transaction은 첫 번째 상품을 차감했다가
+	 * 일부만 되돌리는 것이 아니라 아예 건드리지 않은 상태로 남겨야 한다.
 	 */
 	@Test
 	void takesNoStockAtAllWhenOneLineOfAMultiProductOrderIsShort() throws Exception {
@@ -321,7 +321,7 @@ class PaymentApiIntegrationTest {
 		assertThat(body).doesNotContain("Exception").doesNotContain("com.pulseops");
 	}
 
-	// --- validation failures ------------------------------------------------
+	// --- Validation 실패 ----------------------------------------------------
 
 	@Test
 	void rejectsMissingOrderId() throws Exception {
@@ -345,11 +345,11 @@ class PaymentApiIntegrationTest {
 		assertThat(body).contains("orderId");
 	}
 
-	// --- surface area -------------------------------------------------------
+	// --- 노출 범위 ----------------------------------------------------------
 
 	/**
-	 * Reading, changing, refunding and cancelling payments are out of scope for this
-	 * phase, so no such endpoint may exist yet.
+	 * 결제 조회, 변경, 환불, 취소는 현재 Phase의 범위가 아니므로 관련 Endpoint가 아직 존재해서는
+	 * 안 된다.
 	 */
 	@Test
 	void exposesNoEndpointBesidesCreatingAPayment() throws Exception {
@@ -364,7 +364,7 @@ class PaymentApiIntegrationTest {
 		this.mockMvc.perform(post("/api/payments/1/retry")).andExpect(status().isNotFound());
 	}
 
-	// --- regression ---------------------------------------------------------
+	// --- 회귀 ---------------------------------------------------------------
 
 	@Test
 	void productApiStillWorks() throws Exception {
@@ -398,11 +398,11 @@ class PaymentApiIntegrationTest {
 		this.mockMvc.perform(get("/api/orders/{orderId}", orderId))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.items", hasSize(1)));
-		// placing the order still leaves the stock alone
+		// 주문 생성은 여전히 재고를 차감하지 않는다
 		assertThat(stockOf(product)).isEqualTo(5);
 	}
 
-	// --- helpers ------------------------------------------------------------
+	// --- 헬퍼 ---------------------------------------------------------------
 
 	private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder paymentRequest(String body) {
 		return post("/api/payments").contentType(MediaType.APPLICATION_JSON).content(body);

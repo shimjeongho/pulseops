@@ -31,11 +31,10 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * Two payments racing for the last item in stock, run as genuinely parallel
- * transactions against a real MySQL 8.4 container. A barrier holds both threads until
- * they are ready, so the two payments really do overlap instead of quietly running one
- * after the other and proving nothing.
- * Requires Docker; skipped automatically when Docker is unavailable.
+ * 마지막 재고를 두고 경합하는 두 결제를 실제 MySQL 8.4 Container에서 진짜로 병렬인
+ * Transaction으로 실행한다. Barrier로 두 Thread가 준비될 때까지 붙잡아 두어, 두 결제가 조용히
+ * 순차 실행되어 아무것도 증명하지 못하는 상황을 막고 실제로 겹쳐서 실행되도록 한다.
+ * Docker가 필요하며 Docker를 사용할 수 없으면 자동으로 건너뛴다.
  */
 @Testcontainers(disabledWithoutDocker = true)
 @Import(TestcontainersConfiguration.class)
@@ -59,8 +58,8 @@ class PaymentConcurrencyIntegrationTest {
 	private JdbcTemplate jdbcTemplate;
 
 	/**
-	 * The product created here is removed again so that tests elsewhere, which count the
-	 * seeded catalogue, still see exactly what the seed migration inserted.
+	 * 여기서 생성한 상품은 다시 제거한다. 초기 데이터 개수를 확인하는 다른 테스트가 Seed
+	 * Migration이 삽입한 데이터만 보도록 하기 위한 것이다.
 	 */
 	@AfterEach
 	void removeProductsCreatedByThisTest() {

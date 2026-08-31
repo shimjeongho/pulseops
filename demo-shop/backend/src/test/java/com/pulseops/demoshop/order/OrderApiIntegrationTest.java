@@ -24,9 +24,9 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * Order API against a real MySQL 8.4 container, exercising the Flyway migrations, the
- * Order/OrderItem mapping and the error contract as they behave at runtime.
- * Requires Docker; skipped automatically when Docker is unavailable.
+ * 실제 MySQL 8.4 Container를 대상으로 Order API를 검증한다. Flyway Migration,
+ * Order/OrderItem Mapping, 오류 응답 규약을 실제 실행 환경과 동일하게 확인한다.
+ * Docker가 필요하며 Docker를 사용할 수 없으면 자동으로 건너뛴다.
  */
 @Testcontainers(disabledWithoutDocker = true)
 @Import(TestcontainersConfiguration.class)
@@ -48,7 +48,7 @@ class OrderApiIntegrationTest {
 	@Autowired
 	private JdbcTemplate jdbcTemplate;
 
-	// --- migrations ---------------------------------------------------------
+	// --- Migration ----------------------------------------------------------
 
 	@Test
 	void flywayAppliesTheOrderMigration() {
@@ -70,7 +70,7 @@ class OrderApiIntegrationTest {
 				"ck_order_item_quantity", "ck_order_item_subtotal");
 	}
 
-	// --- create -------------------------------------------------------------
+	// --- 생성 ---------------------------------------------------------------
 
 	@Test
 	void createsOrderPricedFromServerProductData() throws Exception {
@@ -148,7 +148,7 @@ class OrderApiIntegrationTest {
 		assertThat(first).isNotEqualTo(second);
 	}
 
-	// --- read ---------------------------------------------------------------
+	// --- 조회 ---------------------------------------------------------------
 
 	@Test
 	void listsOrdersWithTheirItems() throws Exception {
@@ -205,7 +205,7 @@ class OrderApiIntegrationTest {
 			.andExpect(jsonPath("$.stackTrace").doesNotExist());
 	}
 
-	// --- business rule failures ---------------------------------------------
+	// --- Business Rule 위반 -------------------------------------------------
 
 	@Test
 	void rejectsDuplicateProductWithBadRequest() throws Exception {
@@ -224,7 +224,7 @@ class OrderApiIntegrationTest {
 		expectRejected(orderJson(INACTIVE_PRODUCT_ID, 1), 409, "PRODUCT_INACTIVE");
 	}
 
-	// --- validation failures ------------------------------------------------
+	// --- Validation 실패 ----------------------------------------------------
 
 	@Test
 	void rejectsEmptyItemList() throws Exception {
@@ -271,12 +271,11 @@ class OrderApiIntegrationTest {
 		assertThat(body).contains("items[0].quantity");
 	}
 
-	// --- atomicity ----------------------------------------------------------
+	// --- 원자성 -------------------------------------------------------------
 
 	/**
-	 * Requests that fail part-way — the second product is inactive, unknown, or a
-	 * duplicate — must leave neither an order nor an item behind for the first,
-	 * perfectly valid product.
+	 * 두 번째 상품이 판매 중지, 미존재, 중복인 경우처럼 요청이 도중에 실패하면 아무 문제 없던
+	 * 첫 번째 상품에 대해서도 주문과 주문 항목이 남아 있어서는 안 된다.
 	 */
 	@Test
 	void doesNotPartiallyPersistOrderWhenRequestIsRejected() throws Exception {
@@ -292,7 +291,7 @@ class OrderApiIntegrationTest {
 		assertThat(countOf("order_item")).isEqualTo(itemsBefore);
 	}
 
-	// --- helpers ------------------------------------------------------------
+	// --- 헬퍼 ---------------------------------------------------------------
 
 	private void expectRejected(String requestBody, int expectedStatus, String expectedCode) throws Exception {
 		this.mockMvc.perform(post("/api/orders").contentType(MediaType.APPLICATION_JSON).content(requestBody))

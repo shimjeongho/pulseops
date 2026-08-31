@@ -10,9 +10,8 @@ export function CartProvider({ children }) {
   }, [items])
 
   /**
-   * Adds to the cart, merging into the line that already holds this product. One line
-   * per product also keeps the order request valid: the backend rejects a request that
-   * names the same product twice.
+   * 장바구니에 담는다. 이미 같은 상품이 있으면 해당 항목에 수량을 합친다. 상품당 항목을 하나로
+   * 유지해야 주문 요청도 유효하다. 백엔드는 같은 상품을 두 번 포함한 요청을 거부한다.
    */
   const addItem = useCallback((product, quantity) => {
     setItems((current) => {
@@ -49,7 +48,7 @@ export function CartProvider({ children }) {
       removeItem,
       clear,
       totalQuantity: items.reduce((sum, item) => sum + item.quantity, 0),
-      // shown as an estimate only; the order's real total comes back from the backend
+      // 화면 표시용 예상 금액이며 실제 주문 총액은 백엔드가 계산해 내려준다
       estimatedTotal: items.reduce((sum, item) => sum + item.price * item.quantity, 0),
     }
   }, [items, addItem, setQuantity, removeItem, clear])

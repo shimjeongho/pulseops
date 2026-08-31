@@ -31,7 +31,7 @@ export function OrderListPage() {
     )
   }
 
-  // newest first: the backend returns them in creation order
+  // 백엔드는 생성 순서로 내려주므로 최신 주문이 위로 오도록 뒤집는다
   const newestFirst = [...orders].reverse()
 
   return (

@@ -14,8 +14,8 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 /**
- * A product on sale in the demo shop. The schema is owned by Flyway; this entity is
- * validated against it at startup (spring.jpa.hibernate.ddl-auto=validate).
+ * Demo Shop에서 판매하는 상품이다. Schema는 Flyway가 관리하며, 이 Entity는 기동 시점에
+ * Schema와 일치하는지 검증된다(spring.jpa.hibernate.ddl-auto=validate).
  */
 @Entity
 @Table(name = "product")
@@ -48,7 +48,7 @@ public class Product {
 	private LocalDateTime updatedAt;
 
 	protected Product() {
-		// for JPA
+		// JPA 전용 기본 생성자
 	}
 
 	public Product(String name, String description, BigDecimal price, int stockQuantity, ProductStatus status) {
@@ -60,17 +60,16 @@ public class Product {
 	}
 
 	/**
-	 * Whether this product can cover the requested quantity. Callers check every
-	 * product before decreasing any, so a shortage on the last line does not leave the
-	 * earlier ones already deducted.
+	 * 요청한 수량을 감당할 재고가 있는지 확인한다. 호출자는 어떤 재고도 차감하기 전에 모든 상품을
+	 * 먼저 검사하므로, 마지막 항목이 부족해도 앞선 상품의 재고가 이미 차감되어 있지 않다.
 	 */
 	public boolean hasStock(int quantity) {
 		return this.stockQuantity >= quantity;
 	}
 
 	/**
-	 * Takes {@code quantity} off the shelf. Stock is only ever reduced through this
-	 * method, so the quantity can never go negative however the caller is written.
+	 * 재고에서 {@code quantity}만큼 차감한다. 재고 감소는 항상 이 Method를 통해서만 이루어지므로
+	 * 호출자가 어떻게 작성되든 재고 수량이 음수가 될 수 없다.
 	 */
 	public void decreaseStock(int quantity) {
 		if (quantity <= 0) {

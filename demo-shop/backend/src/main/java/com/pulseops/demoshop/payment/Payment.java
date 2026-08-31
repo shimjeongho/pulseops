@@ -17,9 +17,9 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 /**
- * A virtual payment attempt against an order. Several attempts may point at one order,
- * so the order is referenced without a unique constraint and without a collection on
- * the order side. The schema is owned by Flyway.
+ * 주문에 대한 가상 결제 시도이다. 하나의 주문에 여러 번의 시도가 있을 수 있으므로 주문 참조에
+ * Unique 제약을 두지 않고 Order 쪽에도 결제 Collection을 두지 않는다.
+ * Schema는 Flyway가 관리한다.
  */
 @Entity
 @Table(name = "payment")
@@ -53,13 +53,12 @@ public class Payment {
 	private LocalDateTime createdAt;
 
 	protected Payment() {
-		// for JPA
+		// JPA 전용 기본 생성자
 	}
 
 	/**
-	 * A settled payment for the whole of an order. The amount is taken from the order
-	 * rather than from the caller, so it cannot drift from what was ordered even if the
-	 * product prices have since changed.
+	 * 주문 전체에 대해 완료된 결제를 만든다. 결제 금액은 호출자가 아니라 주문에서 가져오므로
+	 * 이후 상품 가격이 변경되더라도 주문 당시 금액과 어긋나지 않는다.
 	 */
 	public static Payment success(String paymentNumber, Order order) {
 		Payment payment = new Payment();

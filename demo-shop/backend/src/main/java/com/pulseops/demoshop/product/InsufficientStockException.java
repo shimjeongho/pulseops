@@ -1,8 +1,8 @@
 package com.pulseops.demoshop.product;
 
 /**
- * Raised when a product cannot cover the quantity a payment is trying to take off the
- * shelf. The product is identified so the caller can be told which line is short.
+ * 결제가 차감하려는 수량을 상품 재고가 감당하지 못할 때 발생한다. 어떤 상품이 부족한지
+ * 호출자에게 알릴 수 있도록 상품 정보를 함께 담는다.
  */
 public class InsufficientStockException extends RuntimeException {
 

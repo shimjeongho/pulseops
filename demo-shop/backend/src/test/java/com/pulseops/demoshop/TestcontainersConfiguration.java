@@ -7,9 +7,9 @@ import org.testcontainers.mysql.MySQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
 /**
- * Shared test infrastructure: a MySQL container wired into the Spring context via
- * {@link ServiceConnection}, so integration tests run against a real MySQL instead of
- * an in-memory substitute. Import this from any test that needs the database.
+ * 공용 테스트 인프라이다. {@link ServiceConnection}으로 MySQL Container를 Spring Context에
+ * 연결하여 Integration Test가 In-memory 대체재가 아닌 실제 MySQL을 사용하도록 한다.
+ * 데이터베이스가 필요한 테스트에서 이 설정을 Import한다.
  */
 @TestConfiguration(proxyBeanMethods = false)
 public class TestcontainersConfiguration {
