@@ -1,0 +1,15 @@
+{
+  "eventId": "3f1c8a27-6b90-4d1e-9c44-72b0d5e19a2b",
+  "schemaVersion": 1,
+  "occurredAt": "2026-08-31T12:34:56.123Z",
+  "service": "demo-shop",
+  "serviceInstance": "demo-shop-01:8080",
+  "requestId": "a7d2f0c1-3e55-4a8b-b0d6-1f9c2ab84e10",
+  "method": "POST",
+  "endpoint": "/api/payments",
+  "httpStatus": 409,
+  "success": false,
+  "latencyMs": 37,
+  "errorType": "ORDER_ALREADY_PAID",
+  "errorMessage": "이미 결제가 완료된 주문입니다."
+}
