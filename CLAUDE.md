@@ -265,17 +265,7 @@ Claude Code는 요청받은 범위를 넘어 대규모 구조 변경을 임의�
 
 한 Phase의 기능을 구현하면서 다음 Phase 기능을 미리 추가하지 않는다.
 
-### 주석 언어
-
-개발자가 직접 작성하는 코드 주석과 JavaDoc은 한국어를 기본으로 작성한다.
-
-주석은 코드가 무엇을 하는지 반복하기보다 Business Rule, 설계 의도, 제약사항처럼 코드만으로 파악하기 어려운 내용을 설명할 때 작성한다.
-
-Class명, Method명, 변수명, API Endpoint, Error Code 등 코드 식별자는 영어를 유지한다.
-
-외부 Library, Framework, Protocol 등의 고유 명칭은 원문 표기를 유지한다.
-
-불필요한 주석을 추가하지 않는다.
+코드를 작성할 때는 16. Coding Convention & Code Quality를 따른다.
 
 ---
 
@@ -350,3 +340,209 @@ Correctness
 → Performance
 
 → Abstraction
+
+---
+
+## 16. Coding Convention & Code Quality
+
+이 규칙은 Demo Shop과 PulseOps를 포함한 모든 Phase의 코드에 적용한다.
+
+기능이 동작하더라도 아래 규칙을 명백히 위반해 코드 품질이 악화되었다면 완료로 간주하지 않는다.
+
+### 16-1. Naming Convention
+
+Java:
+
+- Class / Record / Enum: PascalCase
+- Method / Variable / Field: camelCase
+- Constant: UPPER_SNAKE_CASE
+- Package: lowercase
+- Exception: XxxException
+- Request DTO: XxxRequest
+- Response DTO: XxxResponse
+- Repository: XxxRepository
+- Service: XxxService
+- Controller: XxxController
+
+Frontend:
+
+- React Component: PascalCase
+- Hook: useXxx
+- 일반 함수 / 변수: camelCase
+- Context: XxxContext
+- Provider: XxxProvider
+- API 함수는 역할이 드러나는 동사형 이름을 사용한다. 예: getProducts, getProduct, createOrder, getOrders, getOrder, createPayment
+
+파일 이름도 위 Naming Convention과 일관되게 유지한다.
+
+Component를 담은 파일은 PascalCase, 그 외 Module은 camelCase를 사용한다.
+
+### 16-2. 주석 규칙
+
+개발자가 직접 작성하는 코드 주석과 JavaDoc은 한국어를 기본으로 작성한다.
+
+Class명, Method명, 변수명, API Endpoint, Error Code 등 코드 식별자는 영어를 유지한다.
+
+Framework, Library, Protocol 등 외부 기술의 고유 명칭은 원문 표기를 유지한다.
+
+코드 자체를 그대로 읽어주는 불필요한 주석은 작성하지 않는다.
+
+Business Rule, 설계 의도, 제약사항, 기술 선택 이유처럼 코드만으로 이해하기 어려운 내용을 중심으로 주석을 작성한다.
+
+주석 처리된 오래된 코드를 repository에 남기지 않는다.
+
+eslint directive, URL, tool directive 등 기계적 주석은 번역 대상이 아니다.
+
+### 16-3. 책임 분리
+
+하나의 Class / Component / Method / Function은 가능한 한 하나의 명확한 책임을 갖는다.
+
+Controller는 Request 수신, Validation, Service 호출, Response 반환에 집중한다.
+
+Service는 Use Case와 Business Flow를 담당한다.
+
+Entity 상태 변경은 의미가 드러나는 Domain Method를 우선한다.
+
+Repository는 Persistence 책임에 집중한다.
+
+DTO에 Persistence 또는 복잡한 Business Logic을 넣지 않는다.
+
+React Page/Component에 API, Storage, Formatting, Navigation, Domain Logic을 모두 몰아넣지 않는다.
+
+명확히 공통 책임인 API 처리, Formatting, Storage Logic 등만 적절히 분리한다.
+
+### 16-4. 스파게티 코드 방지
+
+다음 형태를 지양한다.
+
+- 지나치게 긴 Method / Function
+- 지나치게 긴 React Component
+- 깊게 중첩된 if / for / try-catch
+- 서로 관련 없는 여러 Domain 책임이 한 함수에 혼재
+- 상태 변경 위치가 여러 곳에 흩어짐
+- Side Effect 실행 순서를 이해하기 어려운 구조
+- API / Storage / Formatting / Navigation / Business Logic이 한 함수에 뒤섞임
+- 이름만 보고 책임을 파악하기 어려운 함수
+- 불필요한 전역 상태
+- 불필요한 useEffect chain
+- 복잡한 nested ternary
+
+복잡한 로직은 의미 있는 작은 단위로 나눈다.
+
+단, 단순한 코드를 지나치게 잘게 쪼개어 흐름을 더 어렵게 만들지 않는다.
+
+### 16-5. 중복 코드
+
+동일한 Business Rule을 여러 위치에 복사하지 않는다.
+
+동일한 Error Parsing, Formatting, Storage Logic이 반복되면 적절한 공통 위치로 분리한다.
+
+단순한 2~3줄의 우연한 중복까지 무조건 추상화하지 않는다.
+
+중복 제거를 이유로 의미 없는 Util / Helper / Wrapper 계층을 만들지 않는다.
+
+실제 중복이고 책임이 명확할 때만 추상화한다.
+
+### 16-6. 단순성 우선
+
+현재 요구사항을 만족하는 가장 단순하고 읽기 쉬운 구현을 우선한다.
+
+미래 확장 가능성만을 이유로 Interface / Factory / Adapter / Manager / Helper / Wrapper를 미리 만들지 않는다.
+
+필요하지 않은 Design Pattern을 도입하지 않는다.
+
+현재 규모에서 불필요한 Hexagonal / Clean Architecture 계층을 추가하지 않는다.
+
+새로운 dependency는 기존 기능으로 해결할 수 없는 경우에만 추가한다.
+
+"나중에 필요할 수 있음"만을 이유로 코드를 만들지 않는다.
+
+### 16-7. Dead Code 금지
+
+다음을 남기지 않는다.
+
+- 사용하지 않는 Class
+- 사용하지 않는 Method / Function
+- 사용하지 않는 Import
+- 사용하지 않는 Variable
+- 사용하지 않는 CSS Selector
+- 사용하지 않는 Asset
+- 주석 처리된 Old Code
+- 임시 Debug Code
+- 의미 없는 TODO / FIXME
+- 미래 Phase Placeholder
+
+TODO / FIXME가 반드시 필요한 경우에는 이유를 명확하게 작성한다.
+
+### 16-8. Backend 스타일
+
+Money 값은 BigDecimal을 사용한다.
+
+Entity를 API Request/Response에 직접 노출하지 않는다.
+
+Transaction Boundary는 Service 계층에서 명확하게 관리한다.
+
+Managed Entity에는 필요한 경우 Dirty Checking을 활용하고 불필요한 save를 반복하지 않는다.
+
+상태 변경은 무분별한 Setter보다 의미 있는 Domain Method를 우선한다.
+
+N+1이 예상되는 조회는 명시적으로 처리한다.
+
+동시성 제어가 필요한 Business Rule은 적절한 DB/JPA Lock 또는 Constraint를 사용한다.
+
+Exception은 Business 의미가 드러나는 이름과 Error Code를 사용한다.
+
+### 16-9. Frontend 스타일
+
+HTTP Client는 Browser fetch를 사용한다.
+
+API 호출은 Domain별 API Module에서 관리한다.
+
+Frontend가 서버 Business 값을 임의로 결정하지 않는다.
+
+Backend Response를 최종 상태 기준으로 사용한다.
+
+파생 가능한 값은 불필요하게 별도 State에 저장하지 않는다.
+
+동일 정보를 여러 State에 중복 저장하지 않는다.
+
+useEffect는 외부 시스템 동기화가 필요한 경우에만 사용한다.
+
+불필요한 useMemo / useCallback / Context를 추가하지 않는다.
+
+의미 있는 HTML 요소(button / Link 등)를 사용한다.
+
+Cart 등 필요한 최소 범위 외에 전역 상태를 만들지 않는다.
+
+### 16-10. 테스트 품질
+
+무엇을 테스트할지는 12. Testing Policy를 따르고, 이 항목은 테스트 코드의 품질 기준을 정한다.
+
+테스트는 구현 상세보다 Business Rule과 외부 계약을 검증한다.
+
+테스트끼리 실행 순서에 의존하지 않는다.
+
+테스트 데이터는 다른 테스트에 영향을 주지 않도록 격리한다.
+
+Thread.sleep 기반 flaky concurrency test를 만들지 않는다.
+
+테스트를 통과시키기 위해 Production Code에 테스트 전용 분기를 추가하지 않는다.
+
+반복 Setup이 실제로 과도할 때만 Test Helper를 사용한다.
+
+Test Helper가 테스트의 의미를 숨기지 않아야 한다.
+
+### 16-11. 변경 후 품질 확인
+
+코드를 생성하거나 수정한 뒤 다음을 확인한다.
+
+- Naming Convention과 일치하는가
+- Package / Folder 구조와 일치하는가
+- Business Logic이 중복되지 않았는가
+- Method / Component가 지나치게 커지지 않았는가
+- 스파게티 코드가 생기지 않았는가
+- 불필요한 Abstraction을 추가하지 않았는가
+- Dead Code가 남지 않았는가
+- 영어 설명형 주석을 새로 작성하지 않았는가
+- 현재 Phase 이후 기능을 선행 구현하지 않았는가
+- 기존 Test / Build / Lint를 깨뜨리지 않았는가
