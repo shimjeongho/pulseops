@@ -1,14 +1,19 @@
 package com.pulseops;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.web.context.WebApplicationContext;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
  * Spring Application Context가 정상적으로 기동되는지 검증한다.
- * PulseOps Backend는 Web Server 없이 기동된다.
+ * PulseOps Backend는 Phase 5-1부터 Servlet Web Application으로 기동된다.
  * <p>
  * Kafka Listener는 시작하지 않는다. Context 기동 여부만 보는 테스트가 Broker 연결에 좌우되면
  * 안 되기 때문이다. 실제 Broker 연동은 Phase 2-6 Integration Test에서 확인한다.
@@ -25,8 +30,21 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @TestPropertySource(properties = "spring.kafka.listener.auto-startup=false")
 class PulseOpsBackendApplicationTests {
 
+	@Autowired
+	private ApplicationContext applicationContext;
+
 	@Test
 	void contextLoads() {
+	}
+
+	/**
+	 * Web 계층이 붙었다는 사실을 Dependency 선언이 아니라 기동 결과로 확인한다. Web Starter가
+	 * 빠지면 Context Type이 조용히 되돌아가고, 그때 깨지는 것은 이 단계가 아니라 REST와 SSE를
+	 * 올리는 이후 단계이다.
+	 */
+	@Test
+	void startsAsAServletWebApplication() {
+		assertThat(this.applicationContext).isInstanceOf(WebApplicationContext.class);
 	}
 
 }
