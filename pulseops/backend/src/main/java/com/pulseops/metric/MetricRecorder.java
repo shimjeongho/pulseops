@@ -16,6 +16,11 @@ import org.springframework.stereotype.Component;
  * Metric을 남기지 못하는 것은 관측의 손실이지 요청 처리의 실패가 아니다. 그래서 Redis가 응답하지
  * 않거나 이미 반영된 Event가 다시 와도 예외를 밖으로 내보내지 않는다. 예외가 나가면 Kafka
  * Consumer가 같은 offset을 반복해 읽으며 그 자리에 멈춘다.
+ * <p>
+ * 대신 반영 여부를 돌려준다. 예외를 삼키는 것과 아무 일도 없었다고 말하는 것은 다르며, 이 Event로
+ * Metric이 실제로 달라졌는지는 뒤따르는 처리가 알아야 하는 사실이다. 어떤 이유로 반영되지 않았는지는
+ * 구분해서 알리지 않는다. 중복이든 창 밖이든 Redis 장애든 "이 Event 때문에 달라진 것이 없다"는
+ * 결론은 같고, 사유를 값으로 노출하면 부르는 쪽이 사유마다 다른 처리를 만들게 된다.
  */
 @Component
 public class MetricRecorder {
@@ -39,22 +44,24 @@ public class MetricRecorder {
 	}
 
 	/**
+	 * 이 Event 때문에 Metric이 실제로 달라졌으면 true를 돌려준다.
+	 * <p>
 	 * 현재 시각을 읽는 자리는 이 한 곳뿐이다. 판단에 쓰는 시각을 여러 번 읽으면 한 Event를
 	 * 처리하는 동안 기준이 흔들리고, 무엇보다 그 시각을 테스트가 정할 수 없게 된다. Clock을 Bean으로
 	 * 두지 않은 것은 Metric 한 곳을 위해 Application 전체에 시간 구성을 만드는 셈이기 때문이다.
 	 */
-	public void record(TelemetryEvent event) {
-		record(event, Instant.now());
+	public boolean record(TelemetryEvent event) {
+		return record(event, Instant.now());
 	}
 
-	void record(TelemetryEvent event, Instant now) {
+	boolean record(TelemetryEvent event, Instant now) {
 		// 창 밖의 Event는 Redis에 닿기 전에 끝낸다. 이미 사라진 Bucket을 되살리거나 아직 오지 않은
 		// 구간에 값을 넣으면 어떤 창에서도 읽히지 않는 Bucket만 남는다. 시각을 지금으로 당겨 맞추면
 		// 실제로 일어나지 않은 시각의 Metric을 만드는 것이라 하지 않는다.
 		if (!MetricWindow.isWithinAcceptWindow(event.occurredAt(), now)) {
 			logger.debug("집계 창 밖의 Telemetry Event를 건너뛴다. eventId={} occurredAt={} now={}", event.eventId(),
 					event.occurredAt(), now);
-			return;
+			return false;
 		}
 		try {
 			boolean applied = this.metricStore.record(event.eventId(), MetricSeries.from(event),
@@ -64,6 +71,7 @@ public class MetricRecorder {
 			if (!applied) {
 				logger.debug("이미 반영한 Telemetry Event를 건너뛴다. eventId={}", event.eventId());
 			}
+			return applied;
 		}
 		// Redis 장애만 흡수한다. RuntimeException까지 잡으면 Metric 계층의 결함이 조용히 묻히고,
 		// 잘못 계산된 Metric이 정상처럼 쌓인다. 예외 message에는 Redis가 돌려준 값이 담길 수 있어
@@ -71,6 +79,7 @@ public class MetricRecorder {
 		catch (DataAccessException ex) {
 			logger.warn("Redis에 Metric을 기록하지 못해 Telemetry Event를 건너뛴다. eventId={} reason={}", event.eventId(),
 					ex.getClass().getSimpleName());
+			return false;
 		}
 	}
 

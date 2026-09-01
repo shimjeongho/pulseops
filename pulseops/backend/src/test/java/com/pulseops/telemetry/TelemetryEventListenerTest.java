@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.mock;
 
-import com.pulseops.metric.MetricRecorder;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -50,14 +49,14 @@ class TelemetryEventListenerTest {
 	@Autowired
 	private ObjectMapper objectMapper;
 
-	private final MetricRecorder metricRecorder = mock(MetricRecorder.class);
+	private final TelemetryProcessingService processingService = mock(TelemetryProcessingService.class);
 
 	private TelemetryEventListener listener;
 
 	@BeforeEach
 	void createListener() {
 		this.listener = new TelemetryEventListener(this.objectMapper, new TelemetryEventValidator(),
-				this.metricRecorder);
+				this.processingService);
 	}
 
 	@Test
@@ -161,25 +160,29 @@ class TelemetryEventListenerTest {
 	}
 
 	/**
-	 * 검증을 통과한 Event만 집계로 넘어간다. Listener가 Event를 두 번 넘기면 한 번 일어난 요청이 두 번
+	 * 검증을 통과한 Event만 처리로 넘어간다. Listener가 Event를 두 번 넘기면 한 번 일어난 요청이 두 번
 	 * 세어지고, Redis dedup은 같은 eventId를 한 번만 받으므로 그 중복을 걸러 주지 못한다.
+	 * <p>
+	 * 넘긴 다음에 무엇이 일어나는지는 여기서 보지 않는다. 집계에 넣을지, 넣은 뒤 이상 판정을 부를지는
+	 * {@link TelemetryProcessingService}가 정하며, 그 순서를 Listener가 알면 Kafka Record를 꺼내는
+	 * 책임과 관측 결과를 다루는 책임이 한자리에 섞인다.
 	 */
 	@Test
-	void handsAValidEventToTheMetricRecorderOnce() throws IOException {
+	void handsAValidEventToTheProcessingServiceOnce() throws IOException {
 		consume(readCanonicalFixture());
 
-		ArgumentCaptor<TelemetryEvent> recorded = ArgumentCaptor.forClass(TelemetryEvent.class);
-		then(this.metricRecorder).should().record(recorded.capture());
-		assertThat(recorded.getValue().eventId()).isEqualTo("3f1c8a27-6b90-4d1e-9c44-72b0d5e19a2b");
-		assertThat(recorded.getValue().httpStatus()).isEqualTo(409);
+		ArgumentCaptor<TelemetryEvent> processed = ArgumentCaptor.forClass(TelemetryEvent.class);
+		then(this.processingService).should().process(processed.capture());
+		assertThat(processed.getValue().eventId()).isEqualTo("3f1c8a27-6b90-4d1e-9c44-72b0d5e19a2b");
+		assertThat(processed.getValue().httpStatus()).isEqualTo(409);
 	}
 
 	/**
-	 * 계약을 어긴 Event가 집계에 닿으면 Metric이 실제로 일어나지 않은 요청까지 세게 된다. 집계 창이나
+	 * 계약을 어긴 Event가 처리에 닿으면 Metric이 실제로 일어나지 않은 요청까지 세게 된다. 집계 창이나
 	 * 오류 판정 이전에, 계약 검증을 지난 Event만 넘어간다는 것이 이 경계의 계약이다.
 	 */
 	@Test
-	void neverHandsAnInvalidEventToTheMetricRecorder() throws IOException {
+	void neverHandsAnInvalidEventToTheProcessingService() throws IOException {
 		consume(null);
 		consume("{not-json");
 		consume(canonicalPayloadWith((payload) -> payload.put("schemaVersion", 2)));
@@ -187,7 +190,7 @@ class TelemetryEventListenerTest {
 		consume(canonicalPayloadWith((payload) -> payload.put("latencyMs", -1)));
 		consume(canonicalPayloadWith((payload) -> payload.put("endpoint", "  ")));
 
-		then(this.metricRecorder).shouldHaveNoInteractions();
+		then(this.processingService).shouldHaveNoInteractions();
 	}
 
 	private void consume(String payload) {

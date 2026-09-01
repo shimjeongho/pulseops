@@ -4,6 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
 import com.pulseops.MySqlTestcontainersConfiguration;
+import com.pulseops.incident.DetectionState;
+import com.pulseops.incident.DetectionStateRepository;
+import com.pulseops.incident.IncidentRepository;
+import com.pulseops.incident.IncidentType;
 import com.pulseops.metric.MetricSeries;
 import com.pulseops.metric.MetricSnapshot;
 import com.pulseops.metric.MetricWindow;
@@ -55,6 +59,9 @@ import tools.jackson.databind.node.ObjectNode;
  * Record를 다시 전달했을 때 Redis dedup이 그 재전달을 실제로 막는지이다. 그래서 Kafka와 Redis를 모두
  * 진짜로 띄우고 Mock을 쓰지 않는다.
  * <p>
+ * 집계에 반영된 Event는 이어서 이상 판정까지 간다. 그 경로가 실제로 이어져 있는지는 MySQL에 남는
+ * Detection State로 확인한다. Detector를 Mock으로 바꾸면 확인하려던 배선 자체가 사라진다.
+ * <p>
  * 이 경로는 exactly-once가 아니다. Consumer 처리는 at-least-once 성격이고 같은 eventId의 재전달만
  * Redis dedup이 막아 준다. Demo Shop Producer는 발행에 실패해도 요청을 살리는 fail-open이고 Redis
  * 장애 구간의 Event는 WARN 후 건너뛰므로, Metric에서 영구히 빠지는 Event가 있을 수 있다.
@@ -91,6 +98,8 @@ class TelemetryKafkaRedisIntegrationTest {
 
 	private static final MetricSeries STATUS_MIX_SERIES = new MetricSeries("demo-shop", "POST", "/api/orders");
 
+	private static final MetricSeries HOT_PATH_SERIES = new MetricSeries("demo-shop", "POST", "/api/payments");
+
 	private static final String FIXTURE_PATH = "telemetry/telemetry-event-v1.json";
 
 	private static final String REQUEST_COUNT_FIELD = "requestCount";
@@ -115,6 +124,12 @@ class TelemetryKafkaRedisIntegrationTest {
 	@Autowired
 	private RollingMetricService rollingMetricService;
 
+	@Autowired
+	private DetectionStateRepository detectionStateRepository;
+
+	@Autowired
+	private IncidentRepository incidentRepository;
+
 	private KafkaProducer<String, String> producer;
 
 	/** 자기가 만든 Key만 지운다. 전체를 비우면 같은 Redis를 쓰는 다른 상태까지 함께 사라진다. */
@@ -130,9 +145,15 @@ class TelemetryKafkaRedisIntegrationTest {
 		this.producer.close();
 	}
 
+	/**
+	 * Redis Key뿐 아니라 판정이 MySQL에 남긴 것도 지운다. 이제는 반영된 Event 하나하나가 Detection
+	 * State를 만들므로, 남겨 두면 같은 DB를 쓰는 다른 테스트가 자기가 만들지 않은 상태를 보게 된다.
+	 */
 	@AfterEach
-	void removeWrittenKeys() {
+	void removeWrittenKeysAndDetectionResults() {
 		this.redisTemplate.delete(this.writtenKeys);
+		this.incidentRepository.deleteAll();
+		this.detectionStateRepository.deleteAll();
 	}
 
 	/** Kafka로 들어온 Event 하나가 Redis Bucket에 남기는 것 전부를 확인한다. */
@@ -192,6 +213,32 @@ class TelemetryKafkaRedisIntegrationTest {
 		assertThat(snapshot.requestCount()).isEqualTo(2);
 		assertThat(snapshot.errorCount()).isEqualTo(1);
 		assertThat(snapshot.errorRate()).isEqualTo(50.0);
+	}
+
+	/**
+	 * 집계까지가 아니라 이상 판정까지 이어져 있는지를 본다. Kafka Record 하나가 Redis Metric을 바꾸고,
+	 * 그 사실이 곧바로 판정을 불러 MySQL에 Detection State를 남기는 것이 이번 배선의 계약이다.
+	 * <p>
+	 * 종류마다 상태가 하나씩 생기는지까지 확인한다. 판정은 오류율과 응답 시간을 각각 따로 세므로 한
+	 * Event가 두 상태를 모두 지나가야 한다.
+	 * <p>
+	 * Incident는 열리지 않아야 한다. 판정은 이미 닫힌 창만 보는데 방금 들어온 Event는 아직 채워지는
+	 * 중인 Bucket에 있고, 설령 보이더라도 창 하나로는 Incident가 열리지 않는다. Event 하나로 기록이
+	 * 생긴다면 판정 조건이 어딘가에서 무너진 것이다.
+	 */
+	@Test
+	void detectsOnTheSeriesOfAnEventThatReachedTheMetrics() throws Exception {
+		Instant occurredAt = Instant.now();
+
+		publish(HOT_PATH_SERIES, newEventId(), occurredAt, 200, 37L);
+
+		awaitRequestCount(HOT_PATH_SERIES, occurredAt, "1");
+		await().atMost(METRIC_TIMEOUT)
+			.pollInterval(POLL_INTERVAL)
+			.untilAsserted(() -> assertThat(detectionStatesOf(HOT_PATH_SERIES)).hasSize(IncidentType.values().length)
+				.extracting(DetectionState::getType)
+				.containsExactlyInAnyOrder(IncidentType.values()));
+		assertThat(this.incidentRepository.count()).isZero();
 	}
 
 	// --- Kafka 헬퍼 ---------------------------------------------------------
@@ -257,6 +304,20 @@ class TelemetryKafkaRedisIntegrationTest {
 
 	private static String newEventId() {
 		return UUID.randomUUID().toString();
+	}
+
+	// --- Detection 헬퍼 -----------------------------------------------------
+
+	/**
+	 * 계열로 걸러 읽는다. 하나의 Consumer가 여러 계열의 Event를 처리하므로, 전체를 세면 다른 검증이
+	 * 만든 상태까지 함께 잡힌다.
+	 */
+	private List<DetectionState> detectionStatesOf(MetricSeries series) {
+		return this.detectionStateRepository.findAll()
+			.stream()
+			.filter((state) -> state.getService().equals(series.service())
+					&& state.getMethod().equals(series.method()) && state.getEndpoint().equals(series.endpoint()))
+			.toList();
 	}
 
 	// --- Redis 헬퍼 ---------------------------------------------------------
