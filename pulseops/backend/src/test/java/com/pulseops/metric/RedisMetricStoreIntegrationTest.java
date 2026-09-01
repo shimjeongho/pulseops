@@ -72,6 +72,23 @@ class RedisMetricStoreIntegrationTest {
 
 	private static final Instant REJECTED_ARGUMENT_BUCKET = Instant.parse("2026-08-31T12:01:20Z");
 
+	private static final Instant REGISTRY_BUCKET = Instant.parse("2026-08-31T12:03:00Z");
+
+	private static final Instant REGISTRY_LATER_BUCKET = Instant.parse("2026-08-31T12:03:10Z");
+
+	private static final MetricSeries OTHER_SERIES = new MetricSeries("demo-shop", "POST", "/api/orders");
+
+	/**
+	 * 활성 계열을 보는 테스트의 기준 시각이다. Bucket 경계에서 3초 벗어나 있어야 경계를 Bucket 시작으로
+	 * 내리는 계약이 실제로 검증된다. 경계에 딱 맞는 시각은 내림을 해도 값이 같아 차이가 드러나지 않는다.
+	 */
+	private static final Instant ACTIVE_SERIES_NOW = Instant.parse("2026-08-31T12:05:03Z");
+
+	private static final Instant ACTIVE_BUCKET = Instant.parse("2026-08-31T12:04:50Z");
+
+	/** 기준 시각보다 Metric 보관 시간만큼 앞선 Bucket보다 더 오래된 자리다. */
+	private static final Instant STALE_BUCKET = Instant.parse("2026-08-31T11:59:50Z");
+
 	private static final String REQUEST_COUNT_FIELD = "requestCount";
 
 	private static final String ERROR_COUNT_FIELD = "errorCount";
@@ -235,6 +252,112 @@ class RedisMetricStoreIntegrationTest {
 		assertThat(this.redisTemplate.hasKey(countsKey(REJECTED_ARGUMENT_BUCKET))).isFalse();
 	}
 
+	/**
+	 * Dashboard가 계열을 찾는 근거는 이 registry 하나뿐이다. Metric이 반영됐는데 여기 남지 않으면 그
+	 * 계열은 화면에서 통째로 사라진다.
+	 */
+	@Test
+	void registersTheSeriesWhenAnEventIsApplied() {
+		record(newEventId(), REGISTRY_BUCKET, false, 37L);
+
+		assertThat(registryScore(SERIES)).isNotNull();
+	}
+
+	/**
+	 * Metric Key의 endpoint 자리는 중괄호가 밑줄로 바뀐 뒤라 원래 Route Template으로 되돌릴 수 없다.
+	 * registry가 같은 표기를 쓰면 읽는 쪽이 endpoint를 복원하지 못하므로 member는 원본을 그대로 둔다.
+	 */
+	@Test
+	void keepsTheOriginalRouteTemplateInTheRegistryMember() {
+		record(newEventId(), REGISTRY_BUCKET, false, 37L);
+
+		Set<String> members = this.redisTemplate.opsForZSet()
+			.range(RedisMetricStore.SERIES_REGISTRY_KEY, 0, -1);
+
+		assertThat(members).contains("demo-shop|GET|/api/products/{productId}");
+		assertThat(members).noneMatch((value) -> value.contains("_productId_"));
+	}
+
+	/** score가 Bucket 시작이어야 읽는 쪽이 "언제까지 관측됐는가"를 창과 같은 눈금으로 판단할 수 있다. */
+	@Test
+	void scoresTheSeriesWithTheEventBucketStart() {
+		record(newEventId(), REGISTRY_BUCKET, false, 37L);
+
+		assertThat(registryScore(SERIES)).isEqualTo((double) REGISTRY_BUCKET.getEpochSecond());
+	}
+
+	@Test
+	void expiresTheSeriesRegistryWithTheMetricBuckets() {
+		record(newEventId(), REGISTRY_BUCKET, false, 37L);
+
+		assertThat(timeToLive(RedisMetricStore.SERIES_REGISTRY_KEY)).isPositive().isLessThanOrEqualTo(300L);
+	}
+
+	/**
+	 * 재전달된 Event는 Metric을 바꾸지 않으므로 계열이 관측된 시각도 바꾸면 안 된다. 바꾸면 이미 멈춘
+	 * API가 Kafka 재전달만으로 계속 살아 있는 것처럼 보인다.
+	 */
+	@Test
+	void doesNotRefreshTheRegistryForADuplicateEvent() {
+		String eventId = newEventId();
+		record(eventId, REGISTRY_BUCKET, false, 37L);
+
+		boolean secondApplied = record(eventId, REGISTRY_LATER_BUCKET, false, 37L);
+
+		assertThat(secondApplied).isFalse();
+		assertThat(registryScore(SERIES)).isEqualTo((double) REGISTRY_BUCKET.getEpochSecond());
+	}
+
+	@Test
+	void registersEachSeriesSeparately() {
+		record(newEventId(), SERIES, REGISTRY_BUCKET, false, 37L);
+		record(newEventId(), OTHER_SERIES, REGISTRY_BUCKET, false, 41L);
+
+		assertThat(registryScore(SERIES)).isNotNull();
+		assertThat(registryScore(OTHER_SERIES)).isNotNull();
+	}
+
+	@Test
+	void returnsNoActiveSeriesWhenNothingHasBeenObserved() {
+		assertThat(this.metricStore.activeSeries(ACTIVE_SERIES_NOW)).isEmpty();
+	}
+
+	@Test
+	void returnsTheObservedSeriesAsActive() {
+		record(newEventId(), SERIES, ACTIVE_BUCKET, false, 37L);
+		record(newEventId(), OTHER_SERIES, ACTIVE_BUCKET, false, 41L);
+
+		assertThat(this.metricStore.activeSeries(ACTIVE_SERIES_NOW)).containsExactlyInAnyOrder(SERIES, OTHER_SERIES);
+	}
+
+	/**
+	 * Bucket이 이미 만료돼 어떤 창으로도 읽히지 않는 계열이다. 목록에 남으면 언제나 0인 줄이 된다.
+	 */
+	@Test
+	void excludesSeriesObservedBeforeTheMetricRetention() {
+		record(newEventId(), SERIES, STALE_BUCKET, false, 37L);
+
+		assertThat(this.metricStore.activeSeries(ACTIVE_SERIES_NOW)).isEmpty();
+	}
+
+	/**
+	 * 경계 계약이다. {@code ACTIVE_SERIES_NOW}는 Bucket 경계에 있지 않으므로, 가장 오래 지연되어
+	 * 도착한 Event가 이 자리에서 걸러지는지를 이 테스트가 정한다.
+	 * <p>
+	 * {@link MetricRecorder}는 {@code now - 300}에 일어난 Event까지 집계에 넣는다. 그 Event의 registry
+	 * score는 자기 Bucket의 시작이라 {@code now - 300}보다 언제나 앞선다. 그래서 벽시계 시각을 그대로
+	 * 경계로 쓰면 방금 Metric에 반영된 계열이 곧바로 목록에서 빠진다. 경계를 Bucket 시작으로 내려야
+	 * 두 값이 같은 눈금 위에 놓인다.
+	 */
+	@Test
+	void keepsTheOldestStillAcceptedEventVisible() {
+		Instant oldestAccepted = ACTIVE_SERIES_NOW.minusSeconds(300);
+
+		record(newEventId(), SERIES, MetricWindow.bucketStartOf(oldestAccepted), false, 37L);
+
+		assertThat(this.metricStore.activeSeries(ACTIVE_SERIES_NOW)).containsExactly(SERIES);
+	}
+
 	/** script에 넘기는 고정 값이다. 표본 수와 만료 시간을 보는 테스트가 무엇을 고정하는지 정한다. */
 	@Test
 	void fixesThePolicyArgumentsPassedToTheScript() {
@@ -244,10 +367,35 @@ class RedisMetricStoreIntegrationTest {
 	}
 
 	private boolean record(String eventId, Instant bucketStart, boolean metricError, long latencyMs) {
-		this.writtenKeys.add(dedupKey(eventId));
 		this.writtenKeys.add(countsKey(bucketStart));
 		this.writtenKeys.add(latencyKey(bucketStart));
-		return this.metricStore.record(eventId, SERIES, bucketStart, metricError, latencyMs);
+		return record(eventId, SERIES, bucketStart, metricError, latencyMs);
+	}
+
+	/**
+	 * 계열을 직접 정하는 경로이다. registry는 계열마다 member가 갈리므로 한 계열만으로는 확인할 수
+	 * 없는 계약이 있다.
+	 */
+	private boolean record(String eventId, MetricSeries series, Instant bucketStart, boolean metricError,
+			long latencyMs) {
+		this.writtenKeys.add(dedupKey(eventId));
+		this.writtenKeys.add(RedisMetricStore.SERIES_REGISTRY_KEY);
+		this.writtenKeys.add(metricKeyOf(series, bucketStart) + ":counts");
+		this.writtenKeys.add(metricKeyOf(series, bucketStart) + ":latency");
+		return this.metricStore.record(eventId, series, bucketStart, metricError, latencyMs);
+	}
+
+	private static String metricKeyOf(MetricSeries series, Instant bucketStart) {
+		return "pulseops:metric:" + series.service() + ":" + series.method() + ":" + series.endpointKey() + ":"
+				+ bucketStart.getEpochSecond();
+	}
+
+	private Double registryScore(MetricSeries series) {
+		return this.redisTemplate.opsForZSet().score(RedisMetricStore.SERIES_REGISTRY_KEY, member(series));
+	}
+
+	private static String member(MetricSeries series) {
+		return series.service() + "|" + series.method() + "|" + series.endpoint();
 	}
 
 	private String counts(Instant bucketStart, String field) {

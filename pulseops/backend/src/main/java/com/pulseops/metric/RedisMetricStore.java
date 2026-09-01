@@ -3,6 +3,10 @@ package com.pulseops.metric;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.regex.Pattern;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -49,6 +53,32 @@ public class RedisMetricStore {
 
 	private static final String METRIC_KEY_PREFIX = "pulseops:metric:";
 
+	/**
+	 * 관측된 계열을 모아 두는 ZSET이다. Dashboard가 "지금 어떤 계열이 있는가"를 알아야 하는데, Metric
+	 * Key에서 그 답을 얻을 수는 없다. Key의 endpoint 자리는 {@link MetricSeries#endpointKey()}를 거쳐
+	 * 중괄호가 밑줄로 바뀐 뒤라 원래 Route Template으로 되돌릴 수 없고, Key를 훑는 방식은 수명이 훨씬
+	 * 긴 dedup Key까지 함께 지나야 해서 Event 수에 비례해 비싸진다.
+	 * <p>
+	 * SET이 아니라 ZSET인 이유는 member마다 만료를 걸 수 없기 때문이다. 마지막으로 관측된 Bucket을
+	 * score로 두면 읽는 쪽이 오래된 계열을 걸러 낼 수 있어, 따로 정리하는 일 없이 수명이 정해진다.
+	 */
+	static final String SERIES_REGISTRY_KEY = "pulseops:metric:series";
+
+	/**
+	 * registry member는 {@code service|method|endpoint}이며 endpoint는 Key와 달리 원래 Route
+	 * Template 그대로다. 구분자로 세로줄을 쓰는 것은 세 값 중 어디에도 나타날 수 없는 문자이기
+	 * 때문이다. Route Template에는 URL 경로에 쓰이는 문자만 들어온다.
+	 */
+	private static final String MEMBER_SEPARATOR = "|";
+
+	/**
+	 * 세로줄은 정규식에서 선택을 뜻하므로 그대로 넘기면 문자 하나가 아니라 빈 대안으로 읽힌다. 구분자에서
+	 * 직접 pattern을 만들어 둘이 갈라지지 않게 하고, 미리 compile해 호출마다 다시 분석하지 않는다.
+	 */
+	private static final Pattern MEMBER_SEPARATOR_PATTERN = Pattern.compile(Pattern.quote(MEMBER_SEPARATOR));
+
+	private static final int MEMBER_PART_COUNT = 3;
+
 	private static final String DEDUP_KEY_PREFIX = "pulseops:dedup:event:";
 
 	private static final String COUNTS_KEY_SUFFIX = ":counts";
@@ -71,6 +101,8 @@ public class RedisMetricStore {
 
 	/** script가 반영을 뜻해 돌려주는 값이다. 비교로 확인해 응답이 없는 경우까지 unboxing에 기대지 않는다. */
 	private static final Long APPLIED = 1L;
+
+	private static final Logger logger = LoggerFactory.getLogger(RedisMetricStore.class);
 
 	private final StringRedisTemplate redisTemplate;
 
@@ -113,10 +145,10 @@ public class RedisMetricStore {
 			throw new IllegalArgumentException("latencyMs가 음수다: " + latencyMs);
 		}
 		List<String> keys = List.of(dedupKey(eventId), metricKey(series, bucketStart, COUNTS_KEY_SUFFIX),
-				metricKey(series, bucketStart, LATENCY_KEY_SUFFIX));
+				metricKey(series, bucketStart, LATENCY_KEY_SUFFIX), SERIES_REGISTRY_KEY);
 		Long applied = this.redisTemplate.execute(this.metricUpdateScript, keys, metricError ? "1" : "0",
 				Long.toString(latencyMs), Integer.toString(SAMPLE_CAP), Long.toString(METRIC_TTL_SECONDS),
-				Long.toString(DEDUP_TTL_SECONDS));
+				Long.toString(DEDUP_TTL_SECONDS), seriesMember(series), Long.toString(bucketStart.getEpochSecond()));
 		return APPLIED.equals(applied);
 	}
 
@@ -150,6 +182,42 @@ public class RedisMetricStore {
 			return null;
 		});
 		return aggregate(pipelineResults, bucketStarts.size());
+	}
+
+	/**
+	 * 지금 Dashboard에 보여 줄 계열을 돌려준다.
+	 * <p>
+	 * 기준 시각에서 {@link #METRIC_TTL_SECONDS}만큼 앞선 Bucket까지만 살펴본다. 그보다 오래된 계열은
+	 * Bucket이 이미 만료돼 어떤 창으로도 읽히지 않으므로, 남겨 두면 언제나 0인 줄이 된다.
+	 * <p>
+	 * 경계를 Bucket 시작으로 내림하는 것이 중요하다. score는 Bucket 시작이라 벽시계 시각과 그대로
+	 * 비교하면 같은 순간을 서로 다른 눈금으로 재게 된다. {@link MetricRecorder}는 {@code now - 300}에
+	 * 일어난 Event까지 받아들이는데 그 Event의 score는 자기 Bucket의 시작이라 언제나 그 시각보다
+	 * 앞서므로, 내림하지 않으면 방금 기록된 계열이 그 자리에서 걸러진다.
+	 * <p>
+	 * 계열이 없거나 Key가 이미 사라진 것은 정상이며 빈 목록이다. Redis 장애는 뜻이 달라 예외를 그대로
+	 * 올려 보낸다. 여기서 빈 목록으로 바꾸면 읽는 쪽이 장애를 "관측 중인 API 없음"으로 본다.
+	 */
+	public List<MetricSeries> activeSeries(Instant now) {
+		Instant cutoff = MetricWindow.bucketStartOf(now.minusSeconds(METRIC_TTL_SECONDS));
+		Set<String> members = this.redisTemplate.opsForZSet()
+			.rangeByScore(SERIES_REGISTRY_KEY, cutoff.getEpochSecond(), Double.POSITIVE_INFINITY);
+		if (members == null) {
+			return List.of();
+		}
+		List<MetricSeries> activeSeries = new ArrayList<>();
+		for (String member : members) {
+			String[] parts = MEMBER_SEPARATOR_PATTERN.split(member, MEMBER_PART_COUNT);
+			// 이 registry를 쓰는 것은 이 Class뿐이라 형식이 어긋날 일이 없다. 그래도 걸러 내는 이유는
+			// 손상된 값 하나 때문에 나머지 계열까지 보이지 않으면 안 되기 때문이고, 걸러 낸 사실은
+			// 조용히 묻지 않는다.
+			if (parts.length != MEMBER_PART_COUNT) {
+				logger.warn("형식이 어긋난 Metric 계열 등록을 건너뛴다. member={}", member);
+				continue;
+			}
+			activeSeries.add(new MetricSeries(parts[0], parts[1], parts[2]));
+		}
+		return List.copyOf(activeSeries);
 	}
 
 	/**
@@ -201,6 +269,14 @@ public class RedisMetricStore {
 	 */
 	private byte[] toBytes(String value) {
 		return this.redisTemplate.getStringSerializer().serialize(value);
+	}
+
+	/**
+	 * registry에 넣을 계열 식별자이다. Key와 달리 endpoint를 Route Template 그대로 둔다. Key 쪽 표기는
+	 * 중괄호가 밑줄로 바뀌어 되돌릴 수 없어, 읽는 쪽이 원래 endpoint를 복원할 수 없다.
+	 */
+	private static String seriesMember(MetricSeries series) {
+		return series.service() + MEMBER_SEPARATOR + series.method() + MEMBER_SEPARATOR + series.endpoint();
 	}
 
 	/**
