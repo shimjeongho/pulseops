@@ -114,6 +114,31 @@ class GlobalExceptionHandlerIntegrationTest {
 		this.mockMvc.perform(post("/api/metrics")).andExpect(status().isMethodNotAllowed());
 	}
 
+	/**
+	 * 없는 Incident는 서버의 실패가 아니라 요청이 가리킨 것이 없다는 사실이므로 404이며, code로
+	 * 무엇이 없었는지까지 알린다.
+	 */
+	@Test
+	void answersWithNotFoundForAnIncidentThatDoesNotExist() throws Exception {
+		JsonNode body = errorBody(get("/api/incidents/999999"), 404);
+
+		assertThat(body.propertyNames()).containsExactlyInAnyOrderElementsOf(ERROR_FIELDS);
+		assertThat(body.get("code").stringValue()).isEqualTo("INCIDENT_NOT_FOUND");
+		assertThat(body.get("path").stringValue()).isEqualTo("/api/incidents/999999");
+	}
+
+	/**
+	 * 숫자가 아닌 ID는 Controller에 닿기 전에 변환이 실패하지만, 그 실패는 Controller를 향한 요청에서
+	 * 일어나므로 이 Class의 범위 안이다. catch-all에 맡기면 Client의 잘못된 요청이 서버 장애로 나간다.
+	 */
+	@Test
+	void answersWithBadRequestWhenThePathVariableIsNotANumber() throws Exception {
+		JsonNode body = errorBody(get("/api/incidents/abc"), 400);
+
+		assertThat(body.propertyNames()).containsExactlyInAnyOrderElementsOf(ERROR_FIELDS);
+		assertThat(body.get("code").stringValue()).isEqualTo("INVALID_REQUEST");
+	}
+
 	private JsonNode errorBody(org.springframework.test.web.servlet.RequestBuilder request, int expectedStatus)
 			throws Exception {
 		String body = this.mockMvc.perform(request)
