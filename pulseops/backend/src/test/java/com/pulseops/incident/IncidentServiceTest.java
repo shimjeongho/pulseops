@@ -13,10 +13,12 @@ import com.pulseops.incident.dto.IncidentDetailResponse;
 import com.pulseops.incident.dto.IncidentSummaryResponse;
 import com.pulseops.metric.MetricSnapshot;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.ApplicationEventPublisher;
 
 /**
  * 읽은 Incident를 어떤 순서로, 어떤 값으로 내보내는지를 검증한다.
@@ -49,6 +51,15 @@ class IncidentServiceTest {
 
 	private static final Instant RESOLVED_AT = Instant.parse("2026-09-01T06:05:00Z");
 
+	/**
+	 * 확인 처리가 알린 변화를 순서대로 모아 둔다. 알림을 어떻게 내보내는지는 여기서 볼 것이 아니고,
+	 * 무엇을 바꿨을 때 알리고 무엇을 거절했을 때 알리지 않는지만 본다.
+	 */
+	private final List<IncidentChangedEvent> announcedChanges = new ArrayList<>();
+
+	private final ApplicationEventPublisher eventPublisher = (event) -> this.announcedChanges
+		.add((IncidentChangedEvent) event);
+
 	private IncidentRepository incidentRepository;
 
 	private IncidentService incidentService;
@@ -56,7 +67,7 @@ class IncidentServiceTest {
 	@BeforeEach
 	void createService() {
 		this.incidentRepository = mock(IncidentRepository.class);
-		this.incidentService = new IncidentService(this.incidentRepository);
+		this.incidentService = new IncidentService(this.incidentRepository, this.eventPublisher);
 	}
 
 	/** 사람이 확인했다고 장애가 끝난 것은 아니므로 확인된 Incident도 여전히 목록에 있어야 한다. */
@@ -326,6 +337,56 @@ class IncidentServiceTest {
 		assertThatExceptionOfType(IncidentAcknowledgeNotAllowedException.class)
 			.isThrownBy(() -> this.incidentService.acknowledge(1L))
 			.withCauseInstanceOf(IllegalStateException.class);
+	}
+
+	/**
+	 * 확인 처리는 화면에 보이는 상태를 바꾸므로 알려야 한다. 알림의 시각은 Incident에 남은 확인 시각과
+	 * 같은 값이어야 한다. 두 번 읽어 만든 시각은 미세하게 어긋나고, 그 차이는 나중에 설명할 수 없다.
+	 */
+	@Test
+	void announcesTheChangeAfterAcknowledging() {
+		givenLocked(open(ENDPOINT, IncidentSeverity.WARNING, OPENED_AT));
+
+		IncidentDetailResponse detail = this.incidentService.acknowledge(1L);
+
+		assertThat(this.announcedChanges).containsExactly(new IncidentChangedEvent(1L, detail.acknowledgedAt()));
+	}
+
+	/** 거절된 확인은 아무것도 바꾸지 않았으므로 알릴 변화도 없다. */
+	@Test
+	void saysNothingWhenTheAcknowledgeIsRefused() {
+		Incident incident = open(ENDPOINT, IncidentSeverity.WARNING, OPENED_AT);
+		incident.acknowledge(ACKNOWLEDGED_AT);
+		givenLocked(incident);
+
+		assertThatExceptionOfType(IncidentAcknowledgeNotAllowedException.class)
+			.isThrownBy(() -> this.incidentService.acknowledge(1L));
+
+		assertThat(this.announcedChanges).isEmpty();
+	}
+
+	/** 끝난 Incident에 대한 확인도 마찬가지다. 거절은 상태 변화가 아니다. */
+	@Test
+	void saysNothingWhenAcknowledgingAResolvedIncident() {
+		Incident incident = open(ENDPOINT, IncidentSeverity.WARNING, OPENED_AT);
+		incident.resolve(RESOLVED_AT);
+		givenLocked(incident);
+
+		assertThatExceptionOfType(IncidentAcknowledgeNotAllowedException.class)
+			.isThrownBy(() -> this.incidentService.acknowledge(1L));
+
+		assertThat(this.announcedChanges).isEmpty();
+	}
+
+	/** 없는 Incident를 확인하려는 요청은 가리킬 변화 자체가 없다. */
+	@Test
+	void saysNothingWhenTheIncidentToAcknowledgeDoesNotExist() {
+		given(this.incidentRepository.findByIdForUpdate(404L)).willReturn(Optional.empty());
+
+		assertThatExceptionOfType(IncidentNotFoundException.class)
+			.isThrownBy(() -> this.incidentService.acknowledge(404L));
+
+		assertThat(this.announcedChanges).isEmpty();
 	}
 
 	private void givenActive(Incident... incidents) {

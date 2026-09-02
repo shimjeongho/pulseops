@@ -14,6 +14,7 @@ import com.pulseops.metric.MetricSnapshot;
 import com.pulseops.metric.MetricWindow;
 import com.pulseops.metric.RollingMetricService;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -23,6 +24,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.test.context.TestPropertySource;
@@ -96,6 +98,18 @@ class IncidentDetectorIntegrationTest {
 
 	private final RollingMetricService rollingMetricService = mock(RollingMetricService.class);
 
+	/**
+	 * 판정이 알린 변화를 순서대로 모아 둔다. 실제 전달 수단을 세우지 않는 것은 여기서 볼 것이 "언제
+	 * 알리는가"이지 "어떻게 보내는가"가 아니기 때문이다. 알림을 받은 뒤 무엇을 하는지는
+	 * {@link IncidentChangedEventListener}의 몫이고 그쪽 테스트가 따로 본다.
+	 * <p>
+	 * 다른 Type의 Event가 섞이면 형변환에서 곧바로 드러난다. 판정이 알리는 것은 Incident 변경 하나뿐이다.
+	 */
+	private final List<IncidentChangedEvent> announcedChanges = new ArrayList<>();
+
+	private final ApplicationEventPublisher eventPublisher = (event) -> this.announcedChanges
+		.add((IncidentChangedEvent) event);
+
 	@Autowired
 	private DetectionStateRepository detectionStateRepository;
 
@@ -110,7 +124,7 @@ class IncidentDetectorIntegrationTest {
 	@BeforeEach
 	void createDetector() {
 		this.detector = new IncidentDetector(this.rollingMetricService, this.detectionStateRepository,
-				this.incidentRepository, this.transactionTemplate);
+				this.incidentRepository, this.transactionTemplate, this.eventPublisher);
 	}
 
 	@AfterEach
@@ -503,6 +517,96 @@ class IncidentDetectorIntegrationTest {
 	}
 
 	/**
+	 * Incident가 새로 열리는 것은 화면이 곧바로 알아야 할 변화이다. 알림의 시각은 Incident가 열린 시각과
+	 * 같아야 한다. 두 값이 다르면 나중에 알림과 기록을 나란히 놓고 볼 때 무엇이 먼저인지 말할 수 없다.
+	 */
+	@Test
+	void announcesTheChangeWhenAnIncidentIsOpened() {
+		detect(errorRateWarning(WINDOW_1));
+		detect(errorRateWarning(WINDOW_2));
+
+		assertThat(this.announcedChanges).containsExactly(new IncidentChangedEvent(openedId(), WINDOW_2));
+	}
+
+	/** 연속이 아직 기준에 닿지 않아 아무것도 열리지 않았으면 알릴 변화도 없다. */
+	@Test
+	void saysNothingWhenNoIncidentHasOpenedYet() {
+		detect(errorRateWarning(WINDOW_1));
+
+		assertThat(this.announcedChanges).isEmpty();
+	}
+
+	/**
+	 * 창을 판정하는 것과 Incident가 달라지는 것은 다른 일이다. 이상이 이어져도 이미 열린 기록에 바뀔 것이
+	 * 없으면 알리지 않는다. 창마다 알리면 화면이 아무것도 달라지지 않은 상태를 반복해서 다시 읽는다.
+	 */
+	@Test
+	void saysNothingWhileTheAbnormalWindowsChangeNothing() {
+		detect(errorRateWarning(WINDOW_1));
+		detect(errorRateWarning(WINDOW_2));
+		detect(errorRateWarning(WINDOW_3));
+		detect(errorRateWarning(WINDOW_4));
+
+		assertThat(this.announcedChanges).containsExactly(new IncidentChangedEvent(openedId(), WINDOW_2));
+	}
+
+	/** 이미 열린 장애가 더 나빠진 것은 화면이 다시 읽어야 할 변화이다. */
+	@Test
+	void announcesTheChangeWhenTheSeverityIsRaised() {
+		detect(errorRateWarning(WINDOW_1));
+		detect(errorRateWarning(WINDOW_2));
+
+		detect(errorRateCritical(WINDOW_3));
+
+		assertThat(this.announcedChanges).containsExactly(new IncidentChangedEvent(openedId(), WINDOW_2),
+				new IncidentChangedEvent(openedId(), WINDOW_3));
+	}
+
+	/** 심각도가 오르지 않은 창은 Incident를 건드리지 않으므로 알림도 없다. */
+	@Test
+	void saysNothingWhenTheSeverityDoesNotGoUp() {
+		detect(errorRateCritical(WINDOW_1));
+		detect(errorRateCritical(WINDOW_2));
+
+		detect(errorRateWarning(WINDOW_3));
+
+		assertThat(this.announcedChanges).containsExactly(new IncidentChangedEvent(openedId(), WINDOW_2));
+	}
+
+	/** 끝난 것도 알려야 한다. 처리 중인 목록에서 사라지는 일이라 화면이 그대로 두면 끝난 장애가 남는다. */
+	@Test
+	void announcesTheChangeWhenAnIncidentIsResolved() {
+		detect(errorRateWarning(WINDOW_1));
+		detect(errorRateWarning(WINDOW_2));
+
+		detect(healthy(WINDOW_3));
+		detect(healthy(WINDOW_4));
+		detect(healthy(WINDOW_5));
+
+		assertThat(this.announcedChanges).containsExactly(new IncidentChangedEvent(openedId(), WINDOW_2),
+				new IncidentChangedEvent(openedId(), WINDOW_5));
+	}
+
+	/**
+	 * 끝난 Incident는 판정이 다시 잠글 대상이 아니므로 회복이 이어져도 같은 기록을 두 번 알리지 않는다.
+	 * 끝났다는 알림이 반복되면 화면은 그때마다 아무 변화도 없는 조회를 다시 한다.
+	 */
+	@Test
+	void saysNothingWhenTheHealthyWindowsContinueAfterResolving() {
+		detect(errorRateWarning(WINDOW_1));
+		detect(errorRateWarning(WINDOW_2));
+		detect(healthy(WINDOW_3));
+		detect(healthy(WINDOW_4));
+		detect(healthy(WINDOW_5));
+
+		detect(healthy(WINDOW_6));
+		detect(healthy(WINDOW_7));
+
+		assertThat(this.announcedChanges).containsExactly(new IncidentChangedEvent(openedId(), WINDOW_2),
+				new IncidentChangedEvent(openedId(), WINDOW_5));
+	}
+
+	/**
 	 * 판정할 창을 Snapshot으로 직접 정한다. 기준 시각은 그 창이 막 닫히고 다음 Bucket이 채워지는
 	 * 중인 시각으로 두어, 판정이 그 Bucket을 보지 않는다는 전제를 모든 검증이 함께 쓴다.
 	 */
@@ -515,6 +619,11 @@ class IncidentDetectorIntegrationTest {
 		Incident incident = incident(IncidentType.ERROR_RATE).orElseThrow();
 		incident.acknowledge(acknowledgedAt);
 		this.incidentRepository.saveAndFlush(incident);
+	}
+
+	/** 알림이 가리키는 Incident가 실제로 저장된 그 기록인지 확인하기 위한 ID이다. */
+	private Long openedId() {
+		return incident(IncidentType.ERROR_RATE).orElseThrow().getId();
 	}
 
 	private DetectionState state(IncidentType type) {

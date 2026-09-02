@@ -5,6 +5,7 @@ import com.pulseops.incident.dto.IncidentSummaryResponse;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -55,8 +56,11 @@ public class IncidentService {
 
 	private final IncidentRepository incidentRepository;
 
-	public IncidentService(IncidentRepository incidentRepository) {
+	private final ApplicationEventPublisher eventPublisher;
+
+	public IncidentService(IncidentRepository incidentRepository, ApplicationEventPublisher eventPublisher) {
 		this.incidentRepository = incidentRepository;
+		this.eventPublisher = eventPublisher;
 	}
 
 	/**
@@ -117,6 +121,13 @@ public class IncidentService {
 	 * 바뀐 값을 따로 저장하지 않는다. 잠그고 읽은 Incident는 Transaction이 관리하는 상태이므로 commit
 	 * 시점에 변경이 그대로 반영된다. 여기서 save를 부르면 이미 반영될 변경을 한 번 더 지시하는 것뿐이다.
 	 * <p>
+	 * 확인 처리가 실제로 이루어졌을 때만 변경을 알린다. 거절된 요청은 아무것도 바꾸지 않았으므로 알릴
+	 * 것이 없다. 알림에는 바뀐 상태를 담지 않고 어느 Incident가 언제 바뀌었는지만 담으며, 실제 전달은 이
+	 * Transaction이 commit된 뒤에 일어난다. 여기서 곧바로 보내면 뒤이어 되돌아간 변경까지 알리게 된다.
+	 * <p>
+	 * 확인 시각은 한 번만 읽어 Incident와 알림에 같은 값을 넘긴다. 두 번 읽으면 같은 확인이 미세하게 다른
+	 * 두 시각을 갖게 되고, 나중에 그 둘을 나란히 놓고 볼 때 설명할 수 없는 어긋남이 된다.
+	 * <p>
 	 * 응답은 상세 조회와 같은 형태이다. 확인 직후의 화면은 그 Incident의 최신 상태를 그려야 하는데,
 	 * 그 사이 Detector가 심각도를 올렸을 수도 있어 확인 결과만 돌려주면 화면이 낡은 값을 그린다.
 	 * 같은 Transaction에서 만든 이 응답이 그 시점의 확정된 상태이다.
@@ -125,12 +136,14 @@ public class IncidentService {
 	public IncidentDetailResponse acknowledge(Long incidentId) {
 		Incident incident = this.incidentRepository.findByIdForUpdate(incidentId)
 			.orElseThrow(() -> new IncidentNotFoundException(incidentId));
+		Instant acknowledgedAt = Instant.now();
 		try {
-			incident.acknowledge(Instant.now());
+			incident.acknowledge(acknowledgedAt);
 		}
 		catch (IllegalStateException ex) {
 			throw new IncidentAcknowledgeNotAllowedException(incidentId, ex);
 		}
+		this.eventPublisher.publishEvent(new IncidentChangedEvent(incidentId, acknowledgedAt));
 		return IncidentDetailResponse.from(incident);
 	}
 

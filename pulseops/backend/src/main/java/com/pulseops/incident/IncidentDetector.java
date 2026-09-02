@@ -8,6 +8,7 @@ import java.time.Instant;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -36,6 +37,14 @@ import org.springframework.transaction.support.TransactionTemplate;
  * <p>
  * 시각은 스스로 읽지 않고 호출자가 넘긴다. 어느 시점을 기준으로 판정했는지가 결과를 통째로 바꾸므로
  * 그 시점은 테스트가 정할 수 있어야 한다.
+ * <p>
+ * Incident가 실제로 달라졌을 때만 그 사실을 알린다. 창을 판정하는 것과 Incident가 달라지는 것은 다른
+ * 일이다. 이상이 이어져도 이미 열린 Incident에 바뀔 것이 없는 창이 대부분이고, 그때마다 알리면 화면이
+ * 아무것도 달라지지 않은 상태를 반복해서 다시 읽는다.
+ * <p>
+ * 알림을 보내는 방법은 알지 않는다. 여기서는 변경이 있었다는 사실만 Transaction 안에서 알리고, 그것을
+ * 언제 어디로 내보낼지는 {@link IncidentChangedEventListener}가 정한다. 판정이 전달 수단을 알면 Client가
+ * 하나도 붙어 있지 않은 새벽의 판정까지 그 수단의 사정에 묶인다.
  */
 @Service
 public class IncidentDetector {
@@ -63,13 +72,16 @@ public class IncidentDetector {
 
 	private final TransactionTemplate transactionTemplate;
 
+	private final ApplicationEventPublisher eventPublisher;
+
 	public IncidentDetector(RollingMetricService rollingMetricService,
 			DetectionStateRepository detectionStateRepository, IncidentRepository incidentRepository,
-			TransactionTemplate transactionTemplate) {
+			TransactionTemplate transactionTemplate, ApplicationEventPublisher eventPublisher) {
 		this.rollingMetricService = rollingMetricService;
 		this.detectionStateRepository = detectionStateRepository;
 		this.incidentRepository = incidentRepository;
 		this.transactionTemplate = transactionTemplate;
+		this.eventPublisher = eventPublisher;
 	}
 
 	/**
@@ -204,12 +216,15 @@ public class IncidentDetector {
 			MetricSnapshot snapshot) {
 		Optional<Incident> active = lockActive(series, type);
 		if (active.isEmpty()) {
-			this.incidentRepository.save(Incident.open(type, observed, snapshot, snapshot.windowEnd()));
+			Incident opened = this.incidentRepository
+				.save(Incident.open(type, observed, snapshot, snapshot.windowEnd()));
+			publishChanged(opened, snapshot.windowEnd());
 			return;
 		}
 		Incident incident = active.get();
 		if (observed.isHigherThan(incident.getSeverity())) {
 			incident.escalate(observed, snapshot.windowEnd());
+			publishChanged(incident, snapshot.windowEnd());
 		}
 	}
 
@@ -220,7 +235,10 @@ public class IncidentDetector {
 	 * 끝낼 Incident가 없을 수도 있다. 이상이 연속 기준에 닿기 전에 회복된 계열이 그렇다.
 	 */
 	private void resolveActive(MetricSeries series, IncidentType type, Instant resolvedAt) {
-		lockActive(series, type).ifPresent((incident) -> incident.resolve(resolvedAt));
+		lockActive(series, type).ifPresent((incident) -> {
+			incident.resolve(resolvedAt);
+			publishChanged(incident, resolvedAt);
+		});
 	}
 
 	/**
@@ -231,6 +249,20 @@ public class IncidentDetector {
 	 */
 	private Optional<Incident> lockActive(MetricSeries series, IncidentType type) {
 		return this.incidentRepository.findActiveForUpdate(series.service(), series.method(), series.endpoint(), type);
+	}
+
+	/**
+	 * Incident가 달라졌다는 사실을 알린다. 전이를 실제로 마친 자리에서만 부른다.
+	 * <p>
+	 * 알림의 시각으로 전이에 쓴 창의 끝을 그대로 넘긴다. Incident에 남는 openedAt과 resolvedAt, 심각도가
+	 * 오른 시각이 모두 그 값이라, 여기서 시계를 다시 읽으면 같은 전이가 Incident와 알림에서 서로 다른
+	 * 시각을 갖게 된다.
+	 * <p>
+	 * 여는 경로에서는 저장이 끝난 Incident를 받는다. ID는 저장하면서 DB가 정하므로 저장 전에는 무엇이
+	 * 바뀌었는지 가리킬 수가 없다.
+	 */
+	private void publishChanged(Incident incident, Instant occurredAt) {
+		this.eventPublisher.publishEvent(new IncidentChangedEvent(incident.getId(), occurredAt));
 	}
 
 }

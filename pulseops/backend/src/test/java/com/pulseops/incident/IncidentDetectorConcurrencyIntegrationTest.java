@@ -26,6 +26,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -85,12 +86,20 @@ class IncidentDetectorConcurrencyIntegrationTest {
 	@Autowired
 	private TransactionTemplate transactionTemplate;
 
+	/**
+	 * 실제 Publisher를 그대로 쓴다. Incident 변경 알림이 붙은 뒤에도 두 흐름이 서로를 기다리며 멈추지
+	 * 않는지가 이 Class가 지키는 것에 들어가므로, 알림 경로만 대역으로 바꾸면 확인하려는 경쟁이 실제와
+	 * 달라진다.
+	 */
+	@Autowired
+	private ApplicationEventPublisher eventPublisher;
+
 	private IncidentDetector detector;
 
 	@BeforeEach
 	void createDetector() {
 		this.detector = new IncidentDetector(this.rollingMetricService, this.detectionStateRepository,
-				this.incidentRepository, this.transactionTemplate);
+				this.incidentRepository, this.transactionTemplate, this.eventPublisher);
 	}
 
 	@AfterEach
