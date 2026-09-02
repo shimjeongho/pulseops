@@ -1,5 +1,6 @@
 import { fetchActiveIncidents } from '../api/incidents.js'
 import { fetchMetrics } from '../api/metrics.js'
+import { useIncidentStream } from '../api/useIncidentStream.js'
 import { useLastGoodData } from '../api/useLastGoodData.js'
 import { IncidentSection } from '../components/IncidentSection.jsx'
 import { MetricSection } from '../components/MetricSection.jsx'
@@ -19,8 +20,10 @@ const METRIC_POLLING = { intervalMs: 5000 }
  * 함께 비워지고, 그러면 Redis가 잠깐 흔들렸을 뿐인데 Incident 목록이 사라진다. 두 API는 서로 다른
  * 저장소를 읽으므로 함께 실패할 이유도 없다.
  *
- * Incident 목록은 주기적으로 다시 읽지 않는다. lifecycle이 바뀌었다는 사실은 Backend가 이미 알림으로
- * 내보내고 있으므로, 그것을 받는 대신 몇 초마다 물어보는 코드를 지금 넣으면 곧 지워야 한다.
+ * 다시 읽는 방법도 둘이 다르다. Metric은 쉬지 않고 변하는 값이라 주기로 읽고, Incident는 lifecycle이
+ * 바뀌는 순간에만 달라지므로 Backend가 바뀌었다고 알릴 때 읽는다. Incident까지 주기로 읽으면 아무것도
+ * 달라지지 않은 목록을 몇 초마다 다시 만들게 되고, Metric을 알림에 맡기면 알림 하나에 두 가지 일이
+ * 걸려 어느 쪽 때문에 다시 읽는지가 흐려진다.
  */
 export function DashboardPage() {
   const {
@@ -35,6 +38,11 @@ export function DashboardPage() {
     loading: incidentsLoading,
     reload: reloadIncidents,
   } = useLastGoodData(fetchActiveIncidents)
+
+  // 어느 Incident가 바뀌었는지는 보지 않는다. 이 목록은 처리 중인 것 전부라 무엇이 바뀌든 다시
+  // 읽어야 할 것은 같은 목록이고, 알림만 보고 목록의 한 줄을 고치면 그 줄만 최신인 목록이 된다.
+  // 알림에는 상태도 심각도도 없어 애초에 고쳐 넣을 값도 없다.
+  useIncidentStream({ onConnected: reloadIncidents, onIncidentChanged: reloadIncidents })
 
   // 지금 있는 응답에서 셀 수 있는 것만 센다. 여러 계열의 오류율이나 P95를 하나로 합치면 어떤 계열도
   // 뜻하지 않는 숫자가 된다.

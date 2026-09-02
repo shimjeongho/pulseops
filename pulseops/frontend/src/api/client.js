@@ -31,10 +31,14 @@ async function readBody(response) {
   }
 }
 
-export async function getJson(path, signal) {
+/**
+ * 조회와 상태 변경이 method 하나만 다르므로 실제 호출은 한 자리에 둔다. 실패를 어떻게 읽고 어떤
+ * 예외로 옮길지가 두 벌이 되면, 같은 실패를 두고 조회와 변경이 서로 다른 모양으로 실패한다.
+ */
+async function request(method, path, signal) {
   let response
   try {
-    response = await fetch(path, { method: 'GET', headers: { Accept: 'application/json' }, signal })
+    response = await fetch(path, { method, headers: { Accept: 'application/json' }, signal })
   } catch (cause) {
     if (cause.name === 'AbortError') {
       throw cause
@@ -59,4 +63,16 @@ export async function getJson(path, signal) {
   }
 
   return body
+}
+
+export function getJson(path, signal) {
+  return request('GET', path, signal)
+}
+
+/**
+ * 본문 없이 상태 변경만 요청한다. 무엇을 바꿀지는 경로가 정하고 언제 바뀌었는지는 서버가 정하므로
+ * 요청이 실어 보낼 값이 없고, 보낼 값이 없으면 Content-Type도 설명할 것이 없다.
+ */
+export function postJson(path, signal) {
+  return request('POST', path, signal)
 }
