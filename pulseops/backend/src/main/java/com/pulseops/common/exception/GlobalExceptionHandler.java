@@ -1,5 +1,6 @@
 package com.pulseops.common.exception;
 
+import com.pulseops.incident.IncidentAcknowledgeNotAllowedException;
 import com.pulseops.incident.IncidentNotFoundException;
 import com.pulseops.metric.MetricStoreUnavailableException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -68,6 +69,24 @@ public class GlobalExceptionHandler {
 	public ResponseEntity<ErrorResponse> handleIncidentNotFound(IncidentNotFoundException exception,
 			HttpServletRequest request) {
 		return build(HttpStatus.NOT_FOUND, "INCIDENT_NOT_FOUND", "Incident를 찾을 수 없습니다.", request);
+	}
+
+	/**
+	 * 확인 처리로 넘어갈 수 없는 상태이다. 요청이 잘못된 것도 서버가 실패한 것도 아니라 그 사이에
+	 * 상태가 이미 달라진 것이므로 409이다.
+	 * <p>
+	 * 이미 확인된 Incident와 끝난 Incident를 같은 code로 답한다. Client가 이 code로 정하는 일은 "확인
+	 * 버튼을 다시 누르게 하지 않는다" 하나이며, 그 다음에 무엇을 보여 줄지는 code가 아니라 다시 읽은
+	 * 상태가 정한다. 상태마다 code를 나누면 상태 전이 규칙이 Client 쪽에도 복사된다.
+	 * <p>
+	 * log를 남기지 않는다. 사람이 확인을 누르는 사이에 Detector가 Incident를 끝내는 것은 정상적으로
+	 * 일어나는 경쟁이고, 그때마다 경고를 남기면 실제 장애를 찾을 때 걸러 낼 줄만 늘어난다.
+	 */
+	@ExceptionHandler(IncidentAcknowledgeNotAllowedException.class)
+	public ResponseEntity<ErrorResponse> handleIncidentAcknowledgeNotAllowed(
+			IncidentAcknowledgeNotAllowedException exception, HttpServletRequest request) {
+		return build(HttpStatus.CONFLICT, "INCIDENT_ACK_NOT_ALLOWED", "현재 상태에서는 Incident를 확인 처리할 수 없습니다.",
+				request);
 	}
 
 	/**

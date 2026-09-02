@@ -3,8 +3,11 @@ package com.pulseops.incident;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.groups.Tuple.tuple;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 import com.pulseops.incident.dto.IncidentDetailResponse;
 import com.pulseops.incident.dto.IncidentSummaryResponse;
@@ -227,12 +230,114 @@ class IncidentServiceTest {
 			.isThrownBy(() -> this.incidentService.incidentDetail(404L));
 	}
 
+	/** 확인 처리는 사람이 지금부터 본다는 표시이며 그 시각이 함께 남아야 한다. */
+	@Test
+	void acknowledgesAnOpenIncident() {
+		givenLocked(open(ENDPOINT, IncidentSeverity.WARNING, OPENED_AT));
+
+		IncidentDetailResponse detail = this.incidentService.acknowledge(1L);
+
+		assertThat(detail.status()).isEqualTo(IncidentStatus.ACKNOWLEDGED);
+		assertThat(detail.acknowledgedAt()).isNotNull();
+	}
+
+	/** 확인 처리는 잠그고 읽어야 두 요청이 나란히 OPEN을 보고 둘 다 성공하는 일이 없다. */
+	@Test
+	void readsTheIncidentWithALockBeforeAcknowledging() {
+		givenLocked(open(ENDPOINT, IncidentSeverity.WARNING, OPENED_AT));
+
+		this.incidentService.acknowledge(1L);
+
+		verify(this.incidentRepository).findByIdForUpdate(1L);
+		verify(this.incidentRepository, never()).findById(1L);
+	}
+
+	/** 확인 처리가 바꾼 값은 Transaction이 관리하는 상태에 남으므로 따로 저장하지 않는다. */
+	@Test
+	void neverSavesTheIncidentAgainAfterAcknowledging() {
+		givenLocked(open(ENDPOINT, IncidentSeverity.WARNING, OPENED_AT));
+
+		this.incidentService.acknowledge(1L);
+
+		verify(this.incidentRepository, never()).save(any());
+		verify(this.incidentRepository, never()).saveAndFlush(any());
+	}
+
+	@Test
+	void refusesToAcknowledgeAnIncidentThatDoesNotExist() {
+		given(this.incidentRepository.findByIdForUpdate(404L)).willReturn(Optional.empty());
+
+		assertThatExceptionOfType(IncidentNotFoundException.class)
+			.isThrownBy(() -> this.incidentService.acknowledge(404L));
+	}
+
+	/**
+	 * 두 번째 확인을 성공으로 넘기면 나중 사람이 앞사람이 맡고 있는 Incident를 자기가 맡았다고 믿게
+	 * 된다.
+	 */
+	@Test
+	void refusesToAcknowledgeAnAlreadyAcknowledgedIncident() {
+		Incident incident = open(ENDPOINT, IncidentSeverity.WARNING, OPENED_AT);
+		incident.acknowledge(ACKNOWLEDGED_AT);
+		givenLocked(incident);
+
+		assertThatExceptionOfType(IncidentAcknowledgeNotAllowedException.class)
+			.isThrownBy(() -> this.incidentService.acknowledge(1L));
+	}
+
+	/** 끝난 Incident에 사람을 붙이는 것은 뜻이 없다. 아무도 그 장애를 더 보지 않는다. */
+	@Test
+	void refusesToAcknowledgeAResolvedIncident() {
+		Incident incident = open(ENDPOINT, IncidentSeverity.WARNING, OPENED_AT);
+		incident.resolve(RESOLVED_AT);
+		givenLocked(incident);
+
+		assertThatExceptionOfType(IncidentAcknowledgeNotAllowedException.class)
+			.isThrownBy(() -> this.incidentService.acknowledge(1L));
+	}
+
+	/**
+	 * 거절된 확인 처리는 Incident를 조금도 바꾸지 않아야 한다. 일부만 바꾼 뒤 실패하면 되돌릴 것이
+	 * Transaction에 남고, 그 되돌림이 실패하는 자리에서는 앞 확인의 시각이 사라진다.
+	 */
+	@Test
+	void leavesTheIncidentUntouchedWhenTheAcknowledgeIsRefused() {
+		Incident incident = open(ENDPOINT, IncidentSeverity.WARNING, OPENED_AT);
+		incident.acknowledge(ACKNOWLEDGED_AT);
+		givenLocked(incident);
+
+		assertThatExceptionOfType(IncidentAcknowledgeNotAllowedException.class)
+			.isThrownBy(() -> this.incidentService.acknowledge(1L));
+
+		assertThat(incident.getStatus()).isEqualTo(IncidentStatus.ACKNOWLEDGED);
+		assertThat(incident.getAcknowledgedAt()).isEqualTo(ACKNOWLEDGED_AT);
+	}
+
+	/**
+	 * 상태 전이를 거부하는 것은 {@link Incident}이며 Service는 그 거부만 옮긴다. 원인을 남겨 두어야
+	 * 어떤 상태가 막았는지 나중에 추적할 수 있다.
+	 */
+	@Test
+	void keepsTheDomainRefusalAsTheCauseOfTheApplicationFailure() {
+		Incident incident = open(ENDPOINT, IncidentSeverity.WARNING, OPENED_AT);
+		incident.resolve(RESOLVED_AT);
+		givenLocked(incident);
+
+		assertThatExceptionOfType(IncidentAcknowledgeNotAllowedException.class)
+			.isThrownBy(() -> this.incidentService.acknowledge(1L))
+			.withCauseInstanceOf(IllegalStateException.class);
+	}
+
 	private void givenActive(Incident... incidents) {
 		given(this.incidentRepository.findActive()).willReturn(List.of(incidents));
 	}
 
 	private void givenFound(Incident incident) {
 		given(this.incidentRepository.findById(1L)).willReturn(Optional.of(incident));
+	}
+
+	private void givenLocked(Incident incident) {
+		given(this.incidentRepository.findByIdForUpdate(1L)).willReturn(Optional.of(incident));
 	}
 
 	private static Incident open(String endpoint, IncidentSeverity severity, Instant openedAt) {

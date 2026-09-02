@@ -7,9 +7,16 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.pulseops.MySqlTestcontainersConfiguration;
+import com.pulseops.incident.Incident;
+import com.pulseops.incident.IncidentRepository;
+import com.pulseops.incident.IncidentSeverity;
+import com.pulseops.incident.IncidentType;
 import com.pulseops.metric.MetricQueryService;
+import com.pulseops.metric.MetricSnapshot;
 import com.pulseops.metric.MetricStoreUnavailableException;
+import java.time.Instant;
 import java.util.List;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -48,6 +55,14 @@ class GlobalExceptionHandlerIntegrationTest {
 
 	@Autowired
 	private ObjectMapper objectMapper;
+
+	@Autowired
+	private IncidentRepository incidentRepository;
+
+	@AfterEach
+	void removeIncidents() {
+		this.incidentRepository.deleteAll();
+	}
 
 	@MockitoBean
 	private MetricQueryService metricQueryService;
@@ -137,6 +152,42 @@ class GlobalExceptionHandlerIntegrationTest {
 
 		assertThat(body.propertyNames()).containsExactlyInAnyOrderElementsOf(ERROR_FIELDS);
 		assertThat(body.get("code").stringValue()).isEqualTo("INVALID_REQUEST");
+	}
+
+	/**
+	 * 사람이 확인 버튼을 누르는 사이에 Detector가 같은 Incident를 끝내는 것은 정상적으로 일어나는
+	 * 경쟁이다. 그때 요청은 틀리지 않았고 서버도 실패하지 않았으므로 400도 500도 아닌 409이다.
+	 */
+	@Test
+	void answersWithConflictWhenTheIncidentCannotBeAcknowledged() throws Exception {
+		Long id = saveResolvedIncident();
+
+		JsonNode body = errorBody(post("/api/incidents/" + id + "/acknowledge"), 409);
+
+		assertThat(body.propertyNames()).containsExactlyInAnyOrderElementsOf(ERROR_FIELDS);
+		assertThat(body.get("code").stringValue()).isEqualTo("INCIDENT_ACK_NOT_ALLOWED");
+		assertThat(body.get("status").intValue()).isEqualTo(409);
+		assertThat(body.get("path").stringValue()).isEqualTo("/api/incidents/" + id + "/acknowledge");
+	}
+
+	/** 거절의 근거는 Incident가 던진 예외에만 남고 응답에는 상태 이름조차 나가지 않는다. */
+	@Test
+	void neverLeaksTheRefusedStatusToTheClient() throws Exception {
+		Long id = saveResolvedIncident();
+
+		JsonNode body = errorBody(post("/api/incidents/" + id + "/acknowledge"), 409);
+
+		assertThat(body.get("message").stringValue()).doesNotContain("RESOLVED").doesNotContain("status=");
+		assertThat(body.toString()).doesNotContain("IllegalState").doesNotContain("java.lang");
+	}
+
+	private Long saveResolvedIncident() {
+		MetricSnapshot trigger = new MetricSnapshot("demo-shop", "POST", "/api/orders",
+				Instant.parse("2026-09-01T05:59:00Z"), Instant.parse("2026-09-01T06:00:00Z"), 120, 30, 25.0, 240L);
+		Incident incident = Incident.open(IncidentType.ERROR_RATE, IncidentSeverity.WARNING, trigger,
+				Instant.parse("2026-09-01T06:00:00Z"));
+		incident.resolve(Instant.parse("2026-09-01T06:05:00Z"));
+		return this.incidentRepository.saveAndFlush(incident).getId();
 	}
 
 	private JsonNode errorBody(org.springframework.test.web.servlet.RequestBuilder request, int expectedStatus)

@@ -2,6 +2,7 @@ package com.pulseops.incident;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -28,9 +29,10 @@ import tools.jackson.databind.ObjectMapper;
  * 저장소를 흉내 내지 않는다. 상태로 거르는 일과 값을 담는 일이 저장과 조회를 거쳐 실제로 이어져
  * 있는지가 이 단계에서 확인할 것이다.
  * <p>
- * 오류 응답은 여기서 다시 확인하지 않는다. 무엇이 실패하면 어떤 code와 상태가 나가는지는
+ * 오류 응답의 code와 본문 모양은 여기서 확인하지 않는다. 무엇이 실패하면 어떤 code가 나가는지는
  * {@code GlobalExceptionHandlerIntegrationTest}가 같은 Endpoint로 이미 고정하고 있고, 같은 계약을 두
- * 곳에 적으면 한쪽만 바뀌었을 때 어느 쪽이 계약인지 말할 수 없다.
+ * 곳에 적으면 한쪽만 바뀌었을 때 어느 쪽이 계약인지 말할 수 없다. 여기서 보는 것은 어떤 상태 전이가
+ * 거절되는지와 거절이 저장된 값을 건드리지 않는지이며, 그것은 오류 본문이 아니라 Incident의 계약이다.
  * <p>
  * Docker가 필요하며 Docker를 사용할 수 없으면 자동으로 건너뛴다.
  */
@@ -214,6 +216,101 @@ class IncidentApiIntegrationTest {
 		save(open(ENDPOINT, IncidentType.ERROR_RATE, IncidentSeverity.WARNING, OPENED_AT));
 
 		assertThat(getActive().get(0).get("openedAt").stringValue()).isEqualTo("2026-09-01T06:00:00Z");
+	}
+
+	/** 확인 처리는 갱신된 상태를 그대로 돌려주어 Client가 다시 조회하지 않아도 되게 한다. */
+	@Test
+	void acknowledgesAnOpenIncidentAndReturnsItsNewState() throws Exception {
+		Long id = save(open(ENDPOINT, IncidentType.ERROR_RATE, IncidentSeverity.WARNING, OPENED_AT)).getId();
+
+		JsonNode body = acknowledgeOk(id);
+
+		assertThat(body.propertyNames()).containsExactlyInAnyOrderElementsOf(DETAIL_FIELDS);
+		assertThat(body.get("id").longValue()).isEqualTo(id);
+		assertThat(body.get("status").stringValue()).isEqualTo("ACKNOWLEDGED");
+		assertThat(body.get("acknowledgedAt").isNull()).isFalse();
+		assertThat(body.get("acknowledgedAt").stringValue()).endsWith("Z");
+	}
+
+	/** 응답이 아니라 저장된 상태가 계약이다. 응답만 바뀌고 DB가 그대로면 새로고침에 확인이 사라진다. */
+	@Test
+	void storesTheAcknowledgement() throws Exception {
+		Long id = save(open(ENDPOINT, IncidentType.ERROR_RATE, IncidentSeverity.WARNING, OPENED_AT)).getId();
+
+		acknowledgeOk(id);
+
+		assertThat(this.incidentRepository.findById(id)).get().satisfies((incident) -> {
+			assertThat(incident.getStatus()).isEqualTo(IncidentStatus.ACKNOWLEDGED);
+			assertThat(incident.getAcknowledgedAt()).isNotNull();
+		});
+	}
+
+	/** 확인된 Incident는 여전히 처리 중이므로 목록에서 사라지지 않는다. */
+	@Test
+	void keepsTheAcknowledgedIncidentInTheActiveList() throws Exception {
+		Long id = save(open(ENDPOINT, IncidentType.ERROR_RATE, IncidentSeverity.WARNING, OPENED_AT)).getId();
+
+		acknowledgeOk(id);
+
+		JsonNode item = getActive().get(0);
+
+		assertThat(item.get("id").longValue()).isEqualTo(id);
+		assertThat(item.get("status").stringValue()).isEqualTo("ACKNOWLEDGED");
+	}
+
+	/**
+	 * 두 번째 확인은 거절되고 첫 확인의 시각은 그대로 남는다. 나중 요청이 앞 요청의 시각을 덮으면
+	 * 누가 언제부터 보고 있었는지가 사라진다.
+	 */
+	@Test
+	void refusesASecondAcknowledgeAndKeepsTheFirstOne() throws Exception {
+		Long id = save(open(ENDPOINT, IncidentType.ERROR_RATE, IncidentSeverity.WARNING, OPENED_AT)).getId();
+		acknowledgeOk(id);
+		Instant firstAcknowledgedAt = this.incidentRepository.findById(id).orElseThrow().getAcknowledgedAt();
+
+		this.mockMvc.perform(post("/api/incidents/" + id + "/acknowledge")).andExpect(status().isConflict());
+
+		assertThat(this.incidentRepository.findById(id)).get().satisfies((incident) -> {
+			assertThat(incident.getStatus()).isEqualTo(IncidentStatus.ACKNOWLEDGED);
+			assertThat(incident.getAcknowledgedAt()).isEqualTo(firstAcknowledgedAt);
+		});
+	}
+
+	/** 끝난 Incident는 확인 대상이 아니며 거절이 그 기록을 건드려서도 안 된다. */
+	@Test
+	void refusesToAcknowledgeAResolvedIncidentAndLeavesItUntouched() throws Exception {
+		Incident incident = open(ENDPOINT, IncidentType.ERROR_RATE, IncidentSeverity.WARNING, OPENED_AT);
+		incident.resolve(RESOLVED_AT);
+		Long id = save(incident).getId();
+
+		this.mockMvc.perform(post("/api/incidents/" + id + "/acknowledge")).andExpect(status().isConflict());
+
+		assertThat(this.incidentRepository.findById(id)).get().satisfies((resolved) -> {
+			assertThat(resolved.getStatus()).isEqualTo(IncidentStatus.RESOLVED);
+			assertThat(resolved.getResolvedAt()).isEqualTo(RESOLVED_AT);
+			assertThat(resolved.getAcknowledgedAt()).isNull();
+		});
+	}
+
+	/**
+	 * 같은 계열에 오류율과 응답 시간의 Incident가 함께 열려 있을 수 있다. 확인은 ID로 지목한 하나에만
+	 * 붙어야 하며, 계열로 번지면 사람이 보지 않은 이상까지 확인된 것으로 표시된다.
+	 */
+	@Test
+	void acknowledgesOnlyTheIncidentThatWasNamed() throws Exception {
+		Long errorRateId = save(open(ENDPOINT, IncidentType.ERROR_RATE, IncidentSeverity.WARNING, OPENED_AT)).getId();
+		Long latencyId = save(open(ENDPOINT, IncidentType.LATENCY, IncidentSeverity.WARNING, OPENED_AT)).getId();
+
+		acknowledgeOk(errorRateId);
+
+		assertThat(this.incidentRepository.findById(latencyId)).get().satisfies((untouched) -> {
+			assertThat(untouched.getStatus()).isEqualTo(IncidentStatus.OPEN);
+			assertThat(untouched.getAcknowledgedAt()).isNull();
+		});
+	}
+
+	private JsonNode acknowledgeOk(Long incidentId) throws Exception {
+		return this.objectMapper.readTree(body(post("/api/incidents/" + incidentId + "/acknowledge")));
 	}
 
 	private JsonNode getActive() throws Exception {
