@@ -1,6 +1,7 @@
 package com.pulseops.incident;
 
 import com.pulseops.incident.dto.IncidentStreamConnectedResponse;
+import com.pulseops.incident.dto.IncidentStreamHeartbeatResponse;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.Map;
@@ -27,6 +28,10 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
  * 벌에 붙은 Client에게만 간다. 지금은 한 벌만 띄우므로 그대로 두고, 여러 벌이 필요해지는 시점에
  * Broker를 사이에 두어야 한다는 사실을 여기에 적어 둔다.
  * <p>
+ * 흘려보내는 것이 하나 더 있다. 연결이 아직 살아 있다는 신호이다. 그것도 상태가 아니라 신호이고 같은
+ * 연결 목록 위에서 같은 실패 처리를 거치므로 여기에 둔다. 언제 보낼지는 여기서 정하지 않는다.
+ * {@link IncidentSseHeartbeatScheduler}가 주기를 정해 부른다.
+ * <p>
  * 관리하는 {@link SseEmitter}를 스스로 만들지 않고 밖에서 받는다. 연결이 얼마나 살아 있을지는 HTTP
  * 응답의 성질이라 그것을 정하는 자리는 Controller이고, 여기서는 살아 있는 구독의 집합만 안다. 덕분에
  * 이 Class는 실제 HTTP 없이도 그대로 검증할 수 있다.
@@ -39,6 +44,9 @@ public class IncidentSseBroadcaster {
 
 	/** Incident가 바뀌었으니 다시 읽으라는 Event 이름이다. */
 	private static final String INCIDENT_CHANGED_EVENT = "incident-changed";
+
+	/** 연결이 아직 살아 있다는 것만 알리는 Event 이름이다. Client는 이것으로 다시 읽지 않는다. */
+	private static final String HEARTBEAT_EVENT = "heartbeat";
 
 	private static final Logger logger = LoggerFactory.getLogger(IncidentSseBroadcaster.class);
 
@@ -94,6 +102,24 @@ public class IncidentSseBroadcaster {
 	}
 
 	/**
+	 * 열려 있는 모든 연결에 아직 살아 있다는 신호만 보낸다.
+	 * <p>
+	 * 이것이 있어야 Client가 끊긴 연결을 알아챌 수 있다. Backend Process가 사라지면 연결을 끊어 줄
+	 * Stream 시간 초과도 그 Process와 함께 사라지고, 중간의 Proxy가 Client 쪽 연결을 붙들고 있으면
+	 * Client에게는 오류도 종료도 도착하지 않는다. 그러면 EventSource는 열린 채로 남아 스스로 다시
+	 * 잇지 않는다. 주기적으로 무엇인가 보내기로 약속해 두면 그것이 오지 않는 것이 곧 신호가 된다.
+	 * <p>
+	 * 상태를 싣지 않는다. 이 신호는 연결이 살아 있다는 사실만 말하며, 무엇이 참인지는 여전히 REST
+	 * 조회가 정한다. 여기에 상태를 실으면 화면이 주기적으로 도착하는 값을 믿기 시작하고, 이 Stream이
+	 * 신호가 아니라 또 하나의 상태 전달 수단이 된다.
+	 * <p>
+	 * 보고 있는 사람이 없으면 아무 일도 하지 않는다. 이 신호 때문에 저장소를 읽는 일도 없다.
+	 */
+	public void sendHeartbeat() {
+		this.subscribers.forEach(this::sendHeartbeat);
+	}
+
+	/**
 	 * 정리되지 않고 쌓이는 구독이 있는지 확인하기 위한 자리이다. API로 내보내지 않는다. 지금 몇 명이
 	 * 보고 있는지는 운영자가 알아야 할 값이 아니고, 그것을 Endpoint로 열면 없애기 어려운 계약이 된다.
 	 */
@@ -111,6 +137,24 @@ public class IncidentSseBroadcaster {
 		catch (IOException | IllegalStateException ex) {
 			logger.warn("SSE 구독자에게 Incident 변경을 전하지 못해 구독을 취소한다. subscriberId={} incidentId={} reason={}",
 					subscriberId, event.incidentId(), ex.getClass().getSimpleName());
+			unsubscribe(subscriberId, emitter, ex);
+		}
+	}
+
+	/**
+	 * 실패한 연결을 곧바로 목록에서 뺀다. 남겨 두면 이 신호는 주기적으로 반복되므로 죽은 연결 하나가
+	 * 주기마다 같은 log를 찍는다.
+	 */
+	private void sendHeartbeat(String subscriberId, SseEmitter emitter) {
+		try {
+			emitter.send(SseEmitter.event()
+				.name(HEARTBEAT_EVENT)
+				.data(new IncidentStreamHeartbeatResponse(Instant.now())));
+		}
+		// 변경 알림과 같은 이유로 두 예외를 함께 다룬다. 다시 시도하지 않는 것도 같다.
+		catch (IOException | IllegalStateException ex) {
+			logger.warn("SSE 구독자에게 heartbeat를 전하지 못해 구독을 취소한다. subscriberId={} reason={}", subscriberId,
+					ex.getClass().getSimpleName());
 			unsubscribe(subscriberId, emitter, ex);
 		}
 	}

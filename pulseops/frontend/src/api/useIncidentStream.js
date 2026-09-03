@@ -9,6 +9,26 @@ const CONNECTED_EVENT = 'connected'
 /** Incident 하나가 바뀌었으니 다시 읽으라는 Event이다. */
 const INCIDENT_CHANGED_EVENT = 'incident-changed'
 
+/** 연결이 아직 살아 있다는 것만 알리는 Event이다. 이것을 받아 다시 읽지 않는다. */
+const HEARTBEAT_EVENT = 'heartbeat'
+
+/**
+ * 이만큼 아무것도 오지 않으면 연결이 끊긴 것으로 본다.
+ *
+ * Backend가 20초마다 신호를 보내므로 이 값은 그것의 세 배이다. 넉넉하게 잡는 이유는 한 번의 지연이나
+ * 유실로 멀쩡한 연결을 다시 만들지 않기 위해서이다. 신호가 한 번 늦는 것은 흔한 일이고, 그때마다
+ * 연결을 새로 만들면 정작 진짜로 끊긴 것과 구분할 수 없다.
+ */
+const STALE_AFTER_MS = 60000
+
+/**
+ * 이 주기로 마지막 수신 시각을 확인한다.
+ *
+ * 판정 기준보다 짧게 두어 끊김을 알아채기까지 걸리는 시간이 판정 기준에 너무 크게 밀리지 않게 한다.
+ * 이 주기는 Backend에 아무것도 보내지 않으므로 짧아도 비용이 없다.
+ */
+const WATCHDOG_INTERVAL_MS = 10000
+
 /**
  * 알림 본문에서 어느 Incident가 바뀌었는지 읽는다.
  *
@@ -46,10 +66,18 @@ function readChangedIncidentId(data) {
  * 연결이 열렸다는 것을 응답 자체가 아니라 첫 Event로 판단한다. 200과 Content-Type은 중간의 Proxy가
  * 돌려줄 수도 있어, 그것만으로는 Backend까지 실제로 이어졌는지 알 수 없다.
  *
- * 끊김을 직접 다루지 않는다. EventSource는 연결이 끊기면 스스로 다시 잇는다. 여기서 close를 부르면
- * 그 재시도를 막게 되고, 재시도 주기를 손으로 만들면 브라우저가 이미 하는 일을 한 번 더 하다가 연결이
- * 둘이 된다. 끊긴 동안 화면에 남아 있는 값은 지우지 않는다. 알림이 끊긴 것이지 그 값이 틀린 것은
- * 아니다.
+ * 끊김은 대부분 EventSource가 스스로 다시 잇는다. 여기서 하는 일은 그것을 대신하는 것이 아니라,
+ * EventSource가 끊긴 줄 모르는 경우만 보태는 것이다. Backend Process가 사라지면 연결을 끊어 줄 서버
+ * 쪽 시간 초과도 함께 사라지고, 중간의 Proxy가 Client 쪽 연결을 그대로 붙들고 있으면 오류도 종료도
+ * 도착하지 않는다. 그러면 연결은 열린 채로 남아 아무것도 오지 않고, 화면은 정상처럼 보이면서 낡은
+ * 상태에 갇힌다. Backend가 주기적으로 보내기로 약속한 신호가 오지 않는 것으로 그 상태를 알아낸다.
+ *
+ * 끊겼다고 판단해도 여기서 다시 읽지는 않는다. 하는 일은 연결을 새로 만드는 것뿐이고, 다시 읽는 것은
+ * 새 연결이 열렸을 때이다. 그래야 이 Timer가 조회 주기가 되지 않는다. Incident를 주기로 읽지 않는
+ * 것은 이 화면의 설계이며, 연결을 감시하는 일이 그것을 무너뜨리면 안 된다.
+ *
+ * 마지막 수신 시각을 State로 두지 않는다. 신호는 주기적으로 오고 그때마다 화면을 다시 그릴 이유가
+ * 없다. 이 값은 화면에 나타나지 않고 이 Effect 안에서만 쓰이므로 Effect의 지역 변수로 충분하다.
  *
  * @param onConnected 연결이 열렸을 때 부를 함수. render마다 새로 만들면 연결이 매번 끊겼다 이어지므로
  * Module 함수이거나 useCallback으로 고정한 것이어야 한다.
@@ -57,22 +85,56 @@ function readChangedIncidentId(data) {
  */
 export function useIncidentStream({ onConnected, onIncidentChanged }) {
   useEffect(() => {
-    const source = new EventSource(STREAM_PATH)
+    let source = null
+    let lastReceivedAt = 0
 
-    // Event 이름으로 나누어 받는다. 이름 없는 Event만 받는 onmessage로는 둘을 구분할 수 없고,
-    // Backend는 두 Event에 이름을 붙여 보낸다.
-    source.addEventListener(CONNECTED_EVENT, () => onConnected())
-    source.addEventListener(INCIDENT_CHANGED_EVENT, (event) => {
-      const incidentId = readChangedIncidentId(event.data)
-      if (incidentId === null) {
-        console.warn('Incident 변경 알림의 본문을 이해하지 못해 건너뛴다.')
+    function open() {
+      // 아직 아무것도 받지 않은 연결을 곧바로 끊긴 것으로 보지 않도록 만든 시각부터 센다. 연결이
+      // 열리고 첫 신호가 오기까지는 원래 한 주기가 걸린다.
+      lastReceivedAt = Date.now()
+      source = new EventSource(STREAM_PATH)
+
+      // Event 이름으로 나누어 받는다. 이름 없는 Event만 받는 onmessage로는 셋을 구분할 수 없고,
+      // Backend는 세 Event에 모두 이름을 붙여 보낸다.
+      source.addEventListener(CONNECTED_EVENT, () => {
+        lastReceivedAt = Date.now()
+        onConnected()
+      })
+      source.addEventListener(HEARTBEAT_EVENT, () => {
+        lastReceivedAt = Date.now()
+      })
+      source.addEventListener(INCIDENT_CHANGED_EVENT, (event) => {
+        // 본문을 읽기 전에 먼저 기록한다. 본문이 깨진 것과 연결이 끊긴 것은 다른 일이고, 무엇이든
+        // 도착했다는 사실 자체가 연결이 살아 있다는 뜻이다.
+        lastReceivedAt = Date.now()
+        const incidentId = readChangedIncidentId(event.data)
+        if (incidentId === null) {
+          console.warn('Incident 변경 알림의 본문을 이해하지 못해 건너뛴다.')
+          return
+        }
+        onIncidentChanged(incidentId)
+      })
+    }
+
+    open()
+
+    const watchdog = setInterval(() => {
+      if (Date.now() - lastReceivedAt < STALE_AFTER_MS) {
         return
       }
-      onIncidentChanged(incidentId)
-    })
+      console.warn('실시간 알림이 끊긴 것으로 보여 연결을 다시 만든다.')
+      // 새로 만들기 전에 반드시 닫는다. 닫지 않으면 연결이 둘이 되고, 같은 변경 하나에 조회가 두 번
+      // 나간다. 새 연결이 다시 시각을 잡으므로 Backend가 계속 죽어 있어도 이 판정은 기준 시간에 한
+      // 번씩만 일어난다.
+      source.close()
+      open()
+    }, WATCHDOG_INTERVAL_MS)
 
-    // StrictMode는 Effect를 두 번 실행하므로 연결을 반드시 여기서 닫는다. 닫지 않으면 화면 하나가
-    // 연결 둘을 붙들고, 같은 변경 하나에 조회가 두 번 나간다.
-    return () => source.close()
+    // StrictMode는 Effect를 두 번 실행하므로 연결과 Timer를 반드시 여기서 거둔다. 거두지 않으면
+    // 화면 하나가 연결 둘과 Timer 둘을 붙든다.
+    return () => {
+      clearInterval(watchdog)
+      source.close()
+    }
   }, [onConnected, onIncidentChanged])
 }

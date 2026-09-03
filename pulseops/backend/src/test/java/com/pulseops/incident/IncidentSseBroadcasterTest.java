@@ -10,6 +10,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 
 import com.pulseops.incident.dto.IncidentStreamConnectedResponse;
+import com.pulseops.incident.dto.IncidentStreamHeartbeatResponse;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.List;
@@ -195,6 +196,88 @@ class IncidentSseBroadcasterTest {
 		assertThatNoException().isThrownBy(() -> this.broadcaster.broadcast(CHANGE));
 
 		assertThat(this.broadcaster.subscriberCount()).isZero();
+	}
+
+	/**
+	 * Backend Process가 사라지면 연결을 끊어 줄 시간 초과도 함께 사라지고, Proxy가 Client 쪽 연결을
+	 * 붙들고 있으면 Client는 끊긴 것을 알 수 없다. 주기적으로 무엇인가 도착해야 그것이 오지 않는 것을
+	 * 신호로 삼을 수 있다.
+	 * <p>
+	 * 그 신호에 상태를 싣지 않는다. 실으면 화면이 REST 대신 이것을 믿기 시작한다. 본문의 Type이
+	 * 그것을 고정한다.
+	 */
+	@Test
+	void tellsSubscribersThatTheConnectionIsStillAlive() throws IOException {
+		SseEmitter emitter = mock(SseEmitter.class);
+		this.broadcaster.subscribe(emitter);
+
+		this.broadcaster.sendHeartbeat();
+
+		assertThat(sentTo(emitter).get(1)).satisfies((event) -> {
+			assertThat(nameOf(event)).isEqualTo("heartbeat");
+			assertThat(payloadOf(event)).isInstanceOf(IncidentStreamHeartbeatResponse.class);
+		});
+	}
+
+	/** 화면이 여럿이면 전부가 신호를 받아야 한다. 하나만 받으면 나머지는 멀쩡한 연결을 다시 만든다. */
+	@Test
+	void tellsEverySubscriberThatTheConnectionIsStillAlive() throws IOException {
+		SseEmitter first = mock(SseEmitter.class);
+		SseEmitter second = mock(SseEmitter.class);
+		this.broadcaster.subscribe(first);
+		this.broadcaster.subscribe(second);
+
+		this.broadcaster.sendHeartbeat();
+
+		assertThat(nameOf(sentTo(first).get(1))).isEqualTo("heartbeat");
+		assertThat(nameOf(sentTo(second).get(1))).isEqualTo("heartbeat");
+	}
+
+	/**
+	 * 보고 있는 사람이 없는 것은 정상이다. 이 신호는 주기적으로 반복되므로 그때 실패하면 실패가
+	 * 주기마다 되풀이된다.
+	 */
+	@Test
+	void staysQuietWhenNobodyIsWatchingForHeartbeats() {
+		assertThatNoException().isThrownBy(() -> this.broadcaster.sendHeartbeat());
+
+		assertThat(this.broadcaster.subscriberCount()).isZero();
+	}
+
+	/**
+	 * 쓸 수 없게 된 연결은 이 신호에서도 곧바로 목록에서 빠져야 한다. 남겨 두면 주기마다 같은 실패가
+	 * 되풀이되어 log만 쌓인다.
+	 */
+	@Test
+	void dropsASubscriberThatCannotReceiveAHeartbeat() throws IOException {
+		SseEmitter broken = mock(SseEmitter.class);
+		SseEmitter healthy = mock(SseEmitter.class);
+		this.broadcaster.subscribe(broken);
+		this.broadcaster.subscribe(healthy);
+		willThrow(new IOException("연결이 끊어졌다")).given(broken).send(any(SseEventBuilder.class));
+
+		this.broadcaster.sendHeartbeat();
+
+		assertThat(nameOf(sentTo(healthy).get(1))).isEqualTo("heartbeat");
+		assertThat(this.broadcaster.subscriberCount()).isEqualTo(1);
+		then(broken).should().completeWithError(any(IOException.class));
+	}
+
+	/**
+	 * 이 신호가 늘어도 변경 알림은 그대로여야 한다. 둘이 섞이면 화면이 아무것도 달라지지 않은 상태를
+	 * 주기적으로 다시 읽는다.
+	 */
+	@Test
+	void keepsTheChangeAnnouncementSeparateFromHeartbeats() throws IOException {
+		SseEmitter emitter = mock(SseEmitter.class);
+		this.broadcaster.subscribe(emitter);
+
+		this.broadcaster.sendHeartbeat();
+		this.broadcaster.broadcast(CHANGE);
+
+		assertThat(sentTo(emitter).stream().map(IncidentSseBroadcasterTest::nameOf))
+			.containsExactly("connected", "heartbeat", "incident-changed");
+		assertThat(payloadOf(sentTo(emitter).get(2))).isEqualTo(CHANGE);
 	}
 
 	/** 구독 직후의 연결 알림 다음에 오는 것이 변경 알림이다. */

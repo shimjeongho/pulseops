@@ -109,6 +109,23 @@ class IncidentStreamApiIntegrationTest {
 		assertThat(announcement.get("occurredAt").stringValue()).isEqualTo(CHANGE.occurredAt().toString());
 	}
 
+	/**
+	 * 살아 있다는 신호는 이름이 따로 있어야 한다. Client는 이 이름으로 받은 Event에는 다시 읽지 않고
+	 * 연결이 살아 있다는 사실만 기록하므로, 이름을 나누지 않으면 주기마다 조회가 나간다.
+	 * <p>
+	 * 본문에는 보낸 시각 하나뿐이다. Incident도 Metric도 서버 상태도 실리지 않는다는 것이 이 Event의
+	 * 계약이고, 담긴 항목의 이름을 통째로 고정해 그것을 지킨다.
+	 */
+	@Test
+	void sendsHeartbeatsThatCarryNoState() throws Exception {
+		MvcResult stream = openStream();
+
+		this.broadcaster.sendHeartbeat();
+
+		assertThat(eventNamesOf(stream)).containsExactly("connected", "heartbeat");
+		assertThat(payloadOf(stream, "heartbeat").propertyNames()).containsExactly("sentAt");
+	}
+
 	/** 화면이 여럿 열려 있으면 전부가 같은 변화를 받아야 한다. 하나만 받으면 나머지는 낡은 상태를 그린다. */
 	@Test
 	void announcesTheChangeToEveryOpenStream() throws Exception {
