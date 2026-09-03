@@ -3,6 +3,7 @@ package com.pulseops.common.exception;
 import com.pulseops.incident.IncidentAcknowledgeNotAllowedException;
 import com.pulseops.incident.IncidentNotFoundException;
 import com.pulseops.metric.MetricStoreUnavailableException;
+import com.pulseops.report.DailyIncidentReportNotFoundException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -87,6 +88,19 @@ public class GlobalExceptionHandler {
 			IncidentAcknowledgeNotAllowedException exception, HttpServletRequest request) {
 		return build(HttpStatus.CONFLICT, "INCIDENT_ACK_NOT_ALLOWED", "현재 상태에서는 Incident를 확인 처리할 수 없습니다.",
 				request);
+	}
+
+	/**
+	 * 요청한 날짜의 Daily Incident Report가 없다. Incident를 찾지 못한 것과 같은 성격이라 404이며
+	 * 마찬가지로 log를 남기지 않는다. 아직 만들어지지 않은 날짜를 물어보는 것은 정상적인 요청이다.
+	 * <p>
+	 * Report 생성이 실패했을 때의 code를 따로 두지 않는다. 생성은 Scheduler 안에서만 일어나 어떤
+	 * 요청의 결과도 아니며, 그 실패는 응답이 아니라 서버 log에 남는다.
+	 */
+	@ExceptionHandler(DailyIncidentReportNotFoundException.class)
+	public ResponseEntity<ErrorResponse> handleDailyIncidentReportNotFound(
+			DailyIncidentReportNotFoundException exception, HttpServletRequest request) {
+		return build(HttpStatus.NOT_FOUND, "DAILY_REPORT_NOT_FOUND", "Daily Report를 찾을 수 없습니다.", request);
 	}
 
 	/**

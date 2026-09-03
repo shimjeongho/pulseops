@@ -14,7 +14,12 @@ import com.pulseops.incident.IncidentType;
 import com.pulseops.metric.MetricQueryService;
 import com.pulseops.metric.MetricSnapshot;
 import com.pulseops.metric.MetricStoreUnavailableException;
+import com.pulseops.report.DailyIncidentAggregate;
+import com.pulseops.report.DailyIncidentReport;
+import com.pulseops.report.DailyIncidentReportPeriod;
+import com.pulseops.report.DailyIncidentReportRepository;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -59,9 +64,13 @@ class GlobalExceptionHandlerIntegrationTest {
 	@Autowired
 	private IncidentRepository incidentRepository;
 
+	@Autowired
+	private DailyIncidentReportRepository dailyIncidentReportRepository;
+
 	@AfterEach
 	void removeIncidents() {
 		this.incidentRepository.deleteAll();
+		this.dailyIncidentReportRepository.deleteAll();
 	}
 
 	@MockitoBean
@@ -152,6 +161,39 @@ class GlobalExceptionHandlerIntegrationTest {
 
 		assertThat(body.propertyNames()).containsExactlyInAnyOrderElementsOf(ERROR_FIELDS);
 		assertThat(body.get("code").stringValue()).isEqualTo("INVALID_REQUEST");
+	}
+
+	/**
+	 * 아직 만들어지지 않은 날짜의 Daily Report는 없는 것이며, Incident를 찾지 못한 것과 code로
+	 * 구분된다. 같은 404라도 무엇이 없었는지를 Client가 알아야 다음에 무엇을 할지 정할 수 있다.
+	 */
+	@Test
+	void answersWithNotFoundForADailyReportThatDoesNotExist() throws Exception {
+		JsonNode body = errorBody(get("/api/reports/daily/2026-09-03"), 404);
+
+		assertThat(body.propertyNames()).containsExactlyInAnyOrderElementsOf(ERROR_FIELDS);
+		assertThat(body.get("code").stringValue()).isEqualTo("DAILY_REPORT_NOT_FOUND");
+		assertThat(body.get("path").stringValue()).isEqualTo("/api/reports/daily/2026-09-03");
+	}
+
+	/** 날짜로 읽을 수 없는 경로는 Client의 잘못이며 서버 장애가 아니다. */
+	@Test
+	void answersWithBadRequestWhenThePathVariableIsNotADate() throws Exception {
+		JsonNode body = errorBody(get("/api/reports/daily/2026-13-40"), 400);
+
+		assertThat(body.propertyNames()).containsExactlyInAnyOrderElementsOf(ERROR_FIELDS);
+		assertThat(body.get("code").stringValue()).isEqualTo("INVALID_REQUEST");
+	}
+
+	/** 있는 날짜는 정상적으로 나온다. 위의 404가 언제나 404인 것이 아님을 함께 고정한다. */
+	@Test
+	void answersWithTheReportWhenTheDateHasOne() throws Exception {
+		this.dailyIncidentReportRepository
+			.saveAndFlush(DailyIncidentReport.of(new DailyIncidentReportPeriod(LocalDate.of(2026, 9, 3)),
+					new DailyIncidentAggregate(0, 0, 0, 0, 0, 0, null, null),
+					Instant.parse("2026-09-04T00:05:00Z")));
+
+		this.mockMvc.perform(get("/api/reports/daily/2026-09-03")).andExpect(status().isOk());
 	}
 
 	/**

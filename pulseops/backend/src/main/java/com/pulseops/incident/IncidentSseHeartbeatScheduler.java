@@ -28,10 +28,10 @@ import org.springframework.stereotype.Component;
  * Transaction과 아무 관계가 없다. 그래서 판정이나 확인 처리 쪽 코드에 이 책임을 두지 않고 SSE를
  * 다루는 이 자리에만 둔다.
  * <p>
- * 주기 실행에 Spring의 Scheduler를 켜지 않고 전용 Thread 하나를 쓴다. {@code @EnableScheduling}은
- * Application 전체에 시간 기반 실행을 여는 일이라, 지금 필요한 것이 SSE 연결 하나의 사정일 뿐인데
- * 그보다 훨씬 넓은 것을 켜게 된다. 그렇게 열어 두면 이후에 생길 시간 기반 Business 작업과 이 신호가
- * 같은 Scheduler를 나누어 쓰게 되고, 그쪽이 오래 걸리는 날 이 신호가 함께 밀린다.
+ * 주기 실행에 Spring의 Scheduler를 쓰지 않고 전용 Thread 하나를 쓴다. Daily Incident Report 때문에
+ * {@code @EnableScheduling}이 켜져 있지만 이 신호는 거기에 올리지 않는다. 그 Scheduler를 나누어 쓰면
+ * 하루치를 집계하는 일이 오래 걸리는 날 이 신호가 함께 밀리고, 그러면 Client는 멀쩡한 연결을 끊겼다고
+ * 판단해 다시 잇는다. 이 신호가 지켜야 하는 것은 정확한 주기이지 다른 일과의 공유가 아니다.
  * <p>
  * 보내는 일은 스스로 하지 않고 {@link IncidentChangedEventListener}와 같은 Executor에 넘긴다. 그래야
  * 연결 하나에 쓰는 일이 언제나 한 Thread에서만 일어난다. 여기서 직접 보내면 변경 알림을 쓰는 중인

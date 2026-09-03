@@ -1,6 +1,7 @@
 package com.pulseops.incident;
 
 import jakarta.persistence.LockModeType;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -12,7 +13,8 @@ import org.springframework.data.repository.query.Param;
  * Incident의 영속화를 담당한다.
  * <p>
  * 조회는 무엇을 하려고 찾는가로 나뉜다. Detection은 한 계열의 한 종류를 바꾸려고, 확인 처리는 ID로
- * 지목한 하나를 바꾸려고, 화면은 전부를 보여 주려고 찾는다. 바꾸려는 쪽만 잠근다.
+ * 지목한 하나를 바꾸려고, 화면은 전부를 보여 주려고, Daily Report는 끝난 하루를 세려고 찾는다.
+ * 바꾸려는 쪽만 잠근다.
  * <p>
  * 잠그는 조회는 {@link #findByIdForUpdate} 하나뿐이다. 계열로 찾든 ID로 찾든 마지막에는 같은 자물쇠를
  * 잡는다. Incident를 바꾸는 흐름이 서로 다른 방식으로 잠그기 시작하면 잠금 순서가 갈라지고, 그때부터는
@@ -150,5 +152,88 @@ public interface IncidentRepository extends JpaRepository<Incident, Long> {
 			)
 			""")
 	List<Incident> findActive();
+
+	/**
+	 * 한 구간 안에서 열린 Incident 수를 센다.
+	 * <p>
+	 * 아래 다섯 조회는 Daily Incident Report의 집계에만 쓰인다. 전부 잠그지 않고 읽기만 하며, 실시간
+	 * 판정이 보는 "처리 중"과 아무 관계가 없다. Report는 이미 끝난 날짜를 보고 판정은 방금 닫힌 창을
+	 * 보므로, 같은 table을 읽어도 서로의 결과에 영향을 주지 않는다.
+	 * <p>
+	 * 구간은 어디서나 {@code [start, end)}이다. 끝을 포함하면 자정 정각에 일어난 일이 이틀치 Report에
+	 * 모두 세어진다. 그래서 {@code between}을 쓰지 않는다. JPA의 그 조건은 양끝을 모두 포함한다.
+	 * <p>
+	 * Entity를 만들지 않고 DB에서 세어 온다. 하루치 Incident를 전부 읽어 Java에서 세면 세는 데 필요
+	 * 없는 열까지 함께 오고, 그 수가 늘어날수록 Report 생성이 무거워진다.
+	 */
+	@Query("""
+			select count(incident)
+			from Incident incident
+			where incident.openedAt >= :start and incident.openedAt < :end
+			""")
+	long countOpenedIn(@Param("start") Instant start, @Param("end") Instant end);
+
+	/**
+	 * 종류별로 나눠 센다. 종류는 Incident가 열릴 때 정해진 뒤 바뀌지 않으므로 이 값의 뜻은 시간이
+	 * 지나도 흔들리지 않는다. 심각도로는 같은 것을 셀 수 없다. 그것은 나중에 올라갈 수 있어 지금 센
+	 * 값이 "열렸을 때의 심각도"를 뜻하지 않는다.
+	 */
+	@Query("""
+			select count(incident)
+			from Incident incident
+			where incident.openedAt >= :start and incident.openedAt < :end
+				and incident.type = :type
+			""")
+	long countOpenedInByType(@Param("start") Instant start, @Param("end") Instant end,
+			@Param("type") IncidentType type);
+
+	/**
+	 * 한 구간 안에서 확인 처리된 Incident 수를 센다.
+	 * <p>
+	 * 그 날짜에 열린 Incident 중 확인된 것이 아니라, 확인이라는 일이 그 날짜에 일어난 건수이다.
+	 * 전날 열린 Incident를 오늘 확인했다면 그것은 오늘 한 일이다. 이 기준이라야 하루의 Report가
+	 * 그 하루에 실제로 일어난 일을 말한다.
+	 */
+	@Query("""
+			select count(incident)
+			from Incident incident
+			where incident.acknowledgedAt >= :start and incident.acknowledgedAt < :end
+			""")
+	long countAcknowledgedIn(@Param("start") Instant start, @Param("end") Instant end);
+
+	/**
+	 * 구간이 끝나는 순간에 아직 해결되지 않았던 Incident 수를 센다.
+	 * <p>
+	 * 그 날짜에 열린 것만 보지 않는다. 며칠 전에 열려 아직 끝나지 않은 Incident야말로 그 시점에 남아
+	 * 있던 부담이며, 그것을 빼면 이 값은 밀린 일의 양을 뜻하지 못한다.
+	 * <p>
+	 * {@code end} 정각에 해결된 Incident는 아직 해결되지 않은 것으로 센다. 구간이 반개구간이라 그
+	 * 순간은 이미 다음 날에 속하고, 그 해결은 다음 날짜 Report의 해결 건수에 세어진다. 한쪽에서만
+	 * 포함하지 않으면 같은 해결이 두 번 세어지거나 어느 날짜에도 세어지지 않는다.
+	 */
+	@Query("""
+			select count(incident)
+			from Incident incident
+			where incident.openedAt < :end
+				and (incident.resolvedAt is null or incident.resolvedAt >= :end)
+			""")
+	long countUnresolvedAt(@Param("end") Instant end);
+
+	/**
+	 * 한 구간 안에서 해결된 Incident들이 열려 있던 구간을 읽는다.
+	 * <p>
+	 * 평균과 최댓값을 SQL로 구하지 않는다. 두 시각의 차이를 구하는 함수는 DB마다 달라 그것을 쓰는
+	 * 순간 이 조회가 MySQL에 묶이는데, 하루에 해결되는 Incident는 사람이 처리할 수 있는 만큼이라
+	 * 두 시각만 읽어 와 Java에서 계산해도 충분하다.
+	 * <p>
+	 * Entity를 읽지 않고 두 열만 읽는다. 집계에 쓰이지 않는 값까지 함께 오면 영속성 Context에 쌓일
+	 * 뿐이다.
+	 */
+	@Query("""
+			select new com.pulseops.incident.IncidentResolution(incident.openedAt, incident.resolvedAt)
+			from Incident incident
+			where incident.resolvedAt >= :start and incident.resolvedAt < :end
+			""")
+	List<IncidentResolution> findResolutionsIn(@Param("start") Instant start, @Param("end") Instant end);
 
 }
