@@ -1,5 +1,7 @@
 package com.pulseops.demoshop.common.exception;
 
+import com.pulseops.demoshop.faultinjection.DemoFaultInjectedException;
+import com.pulseops.demoshop.faultinjection.InvalidDemoFaultException;
 import com.pulseops.demoshop.order.DuplicateProductException;
 import com.pulseops.demoshop.order.OrderAlreadyPaidException;
 import com.pulseops.demoshop.order.OrderNotFoundException;
@@ -58,6 +60,26 @@ public class GlobalExceptionHandler {
 	public ResponseEntity<ErrorResponse> handleDuplicateProduct(DuplicateProductException exception,
 			HttpServletRequest request) {
 		return build(HttpStatus.BAD_REQUEST, "DUPLICATE_PRODUCT", "같은 상품을 중복해서 주문할 수 없습니다.", request);
+	}
+
+	/**
+	 * 개발 및 Demo 환경에서만 주입되는 장애이다. Client에게는 안정된 Error Code로 보이므로
+	 * 관측도 Java Exception 이름이 아니라 이 Code로 남는다.
+	 */
+	@ExceptionHandler(DemoFaultInjectedException.class)
+	public ResponseEntity<ErrorResponse> handleDemoFaultInjected(DemoFaultInjectedException exception,
+			HttpServletRequest request) {
+		return build(HttpStatus.SERVICE_UNAVAILABLE, "DEMO_FAULT_INJECTED", "의도적으로 주입한 장애입니다.", request);
+	}
+
+	/**
+	 * 알 수 없는 Fault 유형은 잘못된 요청이다. 서비스가 처리하지 못한 오류로 남으면 Demo 도중의
+	 * 오타 하나가 서버 장애처럼 관측된다. 어떤 값이 들어왔는지는 응답에 되돌려 싣지 않는다.
+	 */
+	@ExceptionHandler(InvalidDemoFaultException.class)
+	public ResponseEntity<ErrorResponse> handleInvalidDemoFault(InvalidDemoFaultException exception,
+			HttpServletRequest request) {
+		return build(HttpStatus.BAD_REQUEST, "INVALID_DEMO_FAULT", "지원하지 않는 Fault 유형입니다.", request);
 	}
 
 	@ExceptionHandler(MethodArgumentNotValidException.class)

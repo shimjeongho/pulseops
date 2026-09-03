@@ -119,15 +119,27 @@ public class TelemetryFilter extends OncePerRequestFilter {
 		return routeTemplate.startsWith(API_PATH_PREFIX) ? routeTemplate : UNMAPPED_ENDPOINT;
 	}
 
+	/**
+	 * GlobalExceptionHandler가 Error Code를 확정한 오류는 5xx라도 그 Code를 그대로 남긴다. 이미
+	 * Client에게 안정된 Code로 응답한 오류를 관측만 INTERNAL_SERVER_ERROR로 뭉개면, 원인이 분명한
+	 * 실패와 원인을 모르는 실패가 같은 이름으로 섞여 Incident에서 구분할 수 없게 된다.
+	 * <p>
+	 * Code가 없는 5xx는 여전히 처리되지 않은 오류이므로 INTERNAL_SERVER_ERROR로 남긴다. Exception이
+	 * chain 밖으로 올라온 경우에는 응답 본문이 확정되지 않았으므로 Attribute를 보지 않는다.
+	 */
 	private String resolveErrorType(HttpServletRequest request, Throwable failure, int httpStatus) {
-		if (failure != null || httpStatus >= HttpStatus.INTERNAL_SERVER_ERROR.value()) {
+		if (failure != null) {
 			return INTERNAL_SERVER_ERROR;
 		}
 		if (httpStatus < HttpStatus.BAD_REQUEST.value()) {
 			return null;
 		}
-		String businessErrorCode = TelemetryAttributes.getErrorType(request);
-		return (businessErrorCode != null) ? businessErrorCode : UNHANDLED_CLIENT_ERROR;
+		String handledErrorCode = TelemetryAttributes.getErrorType(request);
+		if (handledErrorCode != null) {
+			return handledErrorCode;
+		}
+		return (httpStatus >= HttpStatus.INTERNAL_SERVER_ERROR.value()) ? INTERNAL_SERVER_ERROR
+				: UNHANDLED_CLIENT_ERROR;
 	}
 
 	/**
