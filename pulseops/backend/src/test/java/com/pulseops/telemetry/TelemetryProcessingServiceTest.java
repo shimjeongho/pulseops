@@ -9,6 +9,7 @@ import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.mock;
 
 import com.pulseops.incident.IncidentDetector;
+import com.pulseops.metric.MetricRecordOutcome;
 import com.pulseops.metric.MetricRecorder;
 import com.pulseops.metric.MetricSeries;
 import java.time.Instant;
@@ -41,7 +42,7 @@ class TelemetryProcessingServiceTest {
 	@Test
 	void detectsOnTheSeriesOfAnEventThatChangedTheMetrics() {
 		TelemetryEvent event = event();
-		givenMetricApplied(true);
+		givenMetricOutcome(MetricRecordOutcome.APPLIED);
 
 		this.processingService.process(event);
 
@@ -50,23 +51,34 @@ class TelemetryProcessingServiceTest {
 		assertThat(detected.getValue()).isEqualTo(new MetricSeries(SERVICE, METHOD, ENDPOINT));
 	}
 
-	/**
-	 * 반영되지 않은 Event로 판정을 부르면 직전과 똑같은 창을 다시 읽고 다시 잠근다. 중복 전달, 집계
-	 * 창 밖, Redis 쓰기 실패는 모두 "Metric이 달라지지 않았다"는 같은 결론이라 같은 자리에서 멈춘다.
-	 */
+	/** 집계 창 밖의 Event는 어떤 창에도 들어가지 않으므로 이어서 확인할 창 자체가 없다. */
 	@Test
-	void doesNotDetectWhenTheEventChangedNothing() {
-		givenMetricApplied(false);
+	void doesNotDetectForAnEventOutsideTheAggregationWindow() {
+		givenMetricOutcome(MetricRecordOutcome.OUT_OF_WINDOW);
 
 		this.processingService.process(event());
 
 		then(this.incidentDetector).shouldHaveNoInteractions();
 	}
 
+	/**
+	 * Phase 7의 핵심이다. 앞선 시도가 Redis 반영까지 끝낸 뒤 판정 도중 실패했다면 재시도로 온 Event는
+	 * 중복으로 걸린다. 여기서 멈추면 그 시도가 남긴 미완의 판정을 아무도 이어받지 못하고, 그 Event가
+	 * 계열의 마지막이었다면 창은 영영 판정되지 않는다.
+	 */
+	@Test
+	void stillDetectsForARedeliveredEventSoAnUnfinishedEvaluationCanResume() {
+		givenMetricOutcome(MetricRecordOutcome.DUPLICATE);
+
+		this.processingService.process(event());
+
+		then(this.incidentDetector).should().detect(any(), any());
+	}
+
 	/** 판정 기준 시각은 집계 반영이 끝난 뒤에 정해진다. 반영 여부를 모르는 채로 창을 정할 이유가 없다. */
 	@Test
 	void picksTheEvaluationInstantAfterTheMetricIsApplied() {
-		givenMetricApplied(true);
+		givenMetricOutcome(MetricRecordOutcome.APPLIED);
 		Instant beforeProcessing = Instant.now();
 
 		this.processingService.process(event());
@@ -89,10 +101,10 @@ class TelemetryProcessingServiceTest {
 		then(this.incidentDetector).shouldHaveNoInteractions();
 	}
 
-	/** 판정 쪽도 마찬가지다. 저장소 장애는 이미 그쪽이 흡수했으므로 여기까지 오는 것은 결함뿐이다. */
+	/** 판정 쪽 실패도 그대로 올라가야 Consumer의 재시도와 DLT가 받을 수 있다. */
 	@Test
 	void doesNotHideAFailureFromTheIncidentDetector() {
-		givenMetricApplied(true);
+		givenMetricOutcome(MetricRecordOutcome.APPLIED);
 		willThrow(new IllegalStateException("판정 계층의 결함"))
 			.given(this.incidentDetector)
 			.detect(any(), any());
@@ -100,8 +112,8 @@ class TelemetryProcessingServiceTest {
 		assertThatIllegalStateException().isThrownBy(() -> this.processingService.process(event()));
 	}
 
-	private void givenMetricApplied(boolean applied) {
-		given(this.metricRecorder.record(any())).willReturn(applied);
+	private void givenMetricOutcome(MetricRecordOutcome outcome) {
+		given(this.metricRecorder.record(any())).willReturn(outcome);
 	}
 
 	/** 계열을 이루는 값 외에는 이 테스트의 관심사가 아니므로 고정한다. */

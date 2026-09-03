@@ -26,6 +26,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Import;
+import org.springframework.dao.DataAccessException;
 import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -469,45 +470,45 @@ class IncidentDetectorIntegrationTest {
 	}
 
 	/**
-	 * Metric을 읽지 못하면 그 창을 판정하지 않는다. 아무 상태도 남기지 않아야 같은 창을 나중에 다시
-	 * 볼 수 있다. 예외를 밖으로 내보내면 Kafka 소비가 그 자리에서 멈춘다.
+	 * Metric을 읽지 못하면 실패를 그대로 올려 보낸다. Phase 4에서는 삼켰지만, 이제는 Consumer의 재시도가
+	 * 같은 Event로 판정을 다시 시도할 수 있어 실패를 알리는 편이 낫다.
+	 * <p>
+	 * 실패한 판정은 아무 상태도 남기지 않는다. 그래야 재시도가 같은 창을 처음부터 다시 볼 수 있다.
 	 */
 	@Test
-	void skipsTheWindowWhenMetricsCannotBeRead() {
+	void propagatesTheFailureWhenMetricsCannotBeRead() {
 		given(this.rollingMetricService.snapshot(eq(SERIES), any()))
 			.willThrow(new RedisConnectionFailureException("연결 실패"));
 
-		this.detector.detect(SERIES, WINDOW_1.plusSeconds(SECONDS_INTO_THE_FILLING_BUCKET));
+		assertThatExceptionOfType(RedisConnectionFailureException.class).isThrownBy(
+				() -> this.detector.detect(SERIES, WINDOW_1.plusSeconds(SECONDS_INTO_THE_FILLING_BUCKET)));
 
 		assertThat(this.detectionStateRepository.count()).isZero();
 		assertThat(this.incidentRepository.count()).isZero();
 	}
 
 	/**
-	 * MySQL이 판정 결과를 받지 못해도 마찬가지다. 여기서 예외가 밖으로 나가면 Kafka Consumer가 같은
-	 * offset을 반복해 읽으며 멈추고, 그 뒤의 Metric까지 함께 잃는다.
+	 * MySQL이 판정 결과를 받지 못해도 마찬가지로 올려 보낸다.
 	 * <p>
 	 * endpoint를 열 길이보다 길게 만들어 저장 자체를 실패시킨다. 실패 지점이 Detection State를 처음
 	 * 만드는 자리라, 되돌아간 Transaction이 아무 흔적도 남기지 않는 것까지 함께 확인된다.
 	 */
 	@Test
-	void skipsTheWindowWhenTheResultCannotBeStored() {
+	void propagatesTheFailureWhenTheResultCannotBeStored() {
 		MetricSeries tooLong = new MetricSeries(SERVICE, METHOD, "/api/" + "x".repeat(300));
 		given(this.rollingMetricService.snapshot(eq(tooLong), any()))
 			.willReturn(new MetricSnapshot(tooLong.service(), tooLong.method(), tooLong.endpoint(),
 					WINDOW_1.minusSeconds(60), WINDOW_1, ENOUGH_REQUESTS, WARNING_ERROR_COUNT, 15.0,
 					HEALTHY_LATENCY_MS));
 
-		this.detector.detect(tooLong, WINDOW_1.plusSeconds(SECONDS_INTO_THE_FILLING_BUCKET));
+		assertThatExceptionOfType(DataAccessException.class).isThrownBy(
+				() -> this.detector.detect(tooLong, WINDOW_1.plusSeconds(SECONDS_INTO_THE_FILLING_BUCKET)));
 
 		assertThat(this.detectionStateRepository.count()).isZero();
 		assertThat(this.incidentRepository.count()).isZero();
 	}
 
-	/**
-	 * 저장소 장애만 흡수한다. 판정 규칙 자체의 결함까지 삼키면 열려야 할 Incident가 열리지 않은 것을
-	 * 아무도 알 수 없다.
-	 */
+	/** 저장소 장애가 아닌 결함도 그대로 올라가야 열려야 할 Incident가 조용히 열리지 않는 일이 없다. */
 	@Test
 	void doesNotHideAFailureThatIsNotAStorageFailure() {
 		given(this.rollingMetricService.snapshot(eq(SERIES), any())).willThrow(new IllegalStateException("결함"));

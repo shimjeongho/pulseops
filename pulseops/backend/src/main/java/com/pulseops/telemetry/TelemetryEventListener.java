@@ -12,14 +12,14 @@ import tools.jackson.databind.ObjectMapper;
 /**
  * Demo Shop이 발행한 Telemetry Event를 수신해 계약을 확인한다.
  * <p>
- * Kafka value를 String으로 받아 Application 안에서 직접 역직렬화한다. Deserializer 계층에서
- * 역직렬화하면 잘못된 payload 하나가 Listener에 닿기도 전에 터져 Spring Kafka의 error handler와
- * Retry/DLT 구성을 강제하게 된다. 이 단계에서는 그런 장치 없이도 잘못된 Event를 log로 남기고
- * 넘어갈 수 있어야 한다.
+ * Kafka value를 String으로 받아 Application 안에서 직접 역직렬화한다. 어떤 byte 배열이든 String으로는
+ * 읽히므로 Deserializer 계층은 실패하지 않고, 잘못된 payload도 Listener 안에서 계약 위반으로 다룰 수
+ * 있다. 그래서 역직렬화 실패를 따로 감싸는 ErrorHandlingDeserializer가 필요하지 않다.
  * <p>
- * 계약을 어긴 Event 때문에 예외를 밖으로 던지지 않는다. 같은 offset이 계속 재전달되어 Consumer가
- * 정체되는 구조를 만들지 않기 위한 것이며, 잘못된 Event는 현재 offset에서 처리 완료로 본다.
- * 반대로 예상하지 못한 오류는 삼키지 않고 그대로 올려 보내 관측 결함이 조용히 묻히지 않게 한다.
+ * 계약을 어긴 Event는 {@link TelemetryEventContractException}으로 올려 보낸다. Phase 6까지는 log만
+ * 남기고 넘어갔는데, 그러면 잘못된 Event가 어디에도 남지 않아 나중에 무엇이 왜 버려졌는지 확인할 수
+ * 없었다. 이제는 이 예외가 재시도 없이 DLT로 가므로, Consumer는 여전히 멈추지 않으면서 원본 Record는
+ * 보존된다.
  * <p>
  * 계약을 지킨 Event는 {@link TelemetryProcessingService}에 넘기고 끝낸다. 집계에 넣을 Event인지,
  * 넣은 뒤에 무엇을 더 할지는 그쪽이 정한다. 이 Class가 협력자를 여럿 들고 순서를 정하기 시작하면
@@ -51,27 +51,23 @@ public class TelemetryEventListener {
 		// Kafka는 value가 없는 Record도 전달할 수 있다. 역직렬화 이전에 걸러 내지 않으면 계약
 		// 위반이 아니라 Listener 자체의 오류로 번진다.
 		if (record.value() == null) {
-			skip(record, "payload가 없다");
-			return;
+			throw contractViolation(record, "payload가 없다");
 		}
 		TelemetryEvent event;
 		try {
 			JsonNode payload = this.objectMapper.readTree(record.value());
 			String structureViolation = this.validator.validateStructure(payload);
 			if (structureViolation != null) {
-				skip(record, structureViolation);
-				return;
+				throw contractViolation(record, structureViolation);
 			}
 			event = this.objectMapper.treeToValue(payload, TelemetryEvent.class);
 		}
 		catch (JacksonException ex) {
-			skip(record, "JSON을 읽지 못했다: " + ex.getClass().getSimpleName());
-			return;
+			throw contractViolation(record, "JSON을 읽지 못했다: " + ex.getClass().getSimpleName());
 		}
 		String violation = this.validator.validate(event);
 		if (violation != null) {
-			skip(record, violation);
-			return;
+			throw contractViolation(record, violation);
 		}
 		logger.debug("Telemetry Event topic={} partition={} offset={} eventId={} service={} endpoint={} httpStatus={} latencyMs={}",
 				record.topic(), record.partition(), record.offset(), event.eventId(), event.service(),
@@ -83,11 +79,15 @@ public class TelemetryEventListener {
 	 * payload와 Jackson 예외 message는 남기지 않는다. Event에는 errorMessage처럼 Client에게 나간
 	 * 문장이 들어 있고 Jackson 예외 message에는 문제가 된 값이 그대로 담기므로, 두 경로 모두
 	 * 값 노출 통로가 된다. 대신 어떤 Record였는지 다시 찾을 수 있는 좌표만 남긴다.
+	 * <p>
+	 * 던지지 않고 돌려준다. 부르는 쪽에서 {@code throw}가 보여야 그 자리에서 처리가 끝난다는 것이
+	 * 드러나고, compiler도 뒤 문장을 도달할 수 없는 코드로 다룬다.
 	 */
-	private void skip(ConsumerRecord<String, String> record, String reason) {
-		logger.warn("Telemetry Event를 건너뛴다. topic={} partition={} offset={} key={} payloadLength={} reason={}",
+	private TelemetryEventContractException contractViolation(ConsumerRecord<String, String> record, String reason) {
+		logger.warn("계약을 어긴 Telemetry Event를 DLT로 보낸다. topic={} partition={} offset={} key={} payloadLength={} reason={}",
 				record.topic(), record.partition(), record.offset(), record.key(),
 				(record.value() != null) ? record.value().length() : 0, reason);
+		return new TelemetryEventContractException(reason);
 	}
 
 }

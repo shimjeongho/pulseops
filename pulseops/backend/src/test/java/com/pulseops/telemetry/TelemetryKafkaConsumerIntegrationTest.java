@@ -61,9 +61,10 @@ import tools.jackson.databind.node.ObjectNode;
  * Listener Container가 꺼내 전달한다. 실제 직렬화, partition, consumer group, offset 경계를 지나야
  * Phase 2-4 Producer 계약과 Phase 2-5 Consumer 계약이 같은 것을 말하고 있는지 확인할 수 있다.
  * <p>
- * Listener는 아직 Redis나 DB에 아무것도 쓰지 않고 log만 남기므로, 처리 결과는 log로 관측한다.
- * 정상 Event는 DEBUG, 건너뛴 Event는 WARN이라는 것 자체가 현재 계약이다. Listener Bean을 Mock으로
- * 바꾸면 검증하려는 Container 경로가 사라지므로 Bean은 그대로 두고 logger에만 Appender를 붙인다.
+ * 여기서 보는 것은 Record가 Listener까지 닿아 어떤 판단을 받았는가이며, 그 판단은 log로 관측한다.
+ * 정상 Event는 DEBUG, 계약을 어긴 Event는 WARN이라는 것 자체가 현재 계약이다. 계약 위반이 그 뒤에
+ * 어떻게 격리되는지는 {@link TelemetryConsumerReliabilityIntegrationTest}가 따로 본다. Listener Bean을
+ * Mock으로 바꾸면 검증하려는 Container 경로가 사라지므로 Bean은 그대로 두고 logger에만 Appender를 붙인다.
  * <p>
  * 각 검증은 자신이 보낸 Record의 partition과 offset으로 해당 log를 찾는다. 모든 테스트가 하나의
  * Topic과 하나의 Consumer를 공유하지만 실행 순서에 의존하지 않는 이유이다.
@@ -95,7 +96,7 @@ class TelemetryKafkaConsumerIntegrationTest {
 
 	private static final String PAYMENT_EVENT_KEY = "demo-shop:/api/payments";
 
-	private static final String SKIP_LOG_MARKER = "Telemetry Event를 건너뛴다";
+	private static final String REJECT_LOG_MARKER = "계약을 어긴 Telemetry Event를 DLT로 보낸다";
 
 	private static final Duration LOG_TIMEOUT = Duration.ofSeconds(60);
 
@@ -239,24 +240,24 @@ class TelemetryKafkaConsumerIntegrationTest {
 		assertThat(log.getFormattedMessage()).contains("eventId=" + eventId);
 	}
 
-	// --- Invalid Event ------------------------------------------------------
+	// --- 계약 위반 Event ------------------------------------------------------
 
 	@Test
-	void skipsMalformedJson() throws Exception {
+	void rejectsMalformedJson() throws Exception {
 		ILoggingEvent log = publishAndAwaitLog(PAYMENT_EVENT_KEY, "{not-json");
 
 		assertThat(log.getLevel()).isEqualTo(Level.WARN);
-		assertThat(log.getFormattedMessage()).contains(SKIP_LOG_MARKER).contains("JSON을 읽지 못했다");
+		assertThat(log.getFormattedMessage()).contains(REJECT_LOG_MARKER).contains("JSON을 읽지 못했다");
 	}
 
 	@Test
-	void skipsUnsupportedSchemaVersion() throws Exception {
+	void rejectsUnsupportedSchemaVersion() throws Exception {
 		String payload = canonicalPayloadWith((event) -> event.put("schemaVersion", 2));
 
 		ILoggingEvent log = publishAndAwaitLog(PAYMENT_EVENT_KEY, payload);
 
 		assertThat(log.getLevel()).isEqualTo(Level.WARN);
-		assertThat(log.getFormattedMessage()).contains(SKIP_LOG_MARKER).contains("schemaVersion");
+		assertThat(log.getFormattedMessage()).contains(REJECT_LOG_MARKER).contains("schemaVersion");
 	}
 
 	/**
@@ -265,7 +266,7 @@ class TelemetryKafkaConsumerIntegrationTest {
 	 * 필드 조합은 Validator 단위 테스트가 담당한다.
 	 */
 	@Test
-	void skipsPayloadMissingLatencyMs() throws Exception {
+	void rejectsPayloadMissingLatencyMs() throws Exception {
 		String payload = canonicalPayloadWith((event) -> event.remove("latencyMs"));
 
 		ILoggingEvent log = publishAndAwaitLog(PAYMENT_EVENT_KEY, payload);
@@ -275,7 +276,7 @@ class TelemetryKafkaConsumerIntegrationTest {
 	}
 
 	@Test
-	void skipsPayloadMissingSuccess() throws Exception {
+	void rejectsPayloadMissingSuccess() throws Exception {
 		String payload = canonicalPayloadWith((event) -> event.remove("success"));
 
 		ILoggingEvent log = publishAndAwaitLog(PAYMENT_EVENT_KEY, payload);
@@ -285,7 +286,7 @@ class TelemetryKafkaConsumerIntegrationTest {
 	}
 
 	@Test
-	void skipsEventWithNegativeLatency() throws Exception {
+	void rejectsEventWithNegativeLatency() throws Exception {
 		String payload = canonicalPayloadWith((event) -> event.put("latencyMs", -1));
 
 		ILoggingEvent log = publishAndAwaitLog(PAYMENT_EVENT_KEY, payload);
@@ -296,7 +297,7 @@ class TelemetryKafkaConsumerIntegrationTest {
 
 	/** success는 v1에서 httpStatus < 400과 같은 뜻이다. 어긋난 Event는 Producer 계약 오류다. */
 	@Test
-	void skipsEventWhereSuccessContradictsHttpStatus() throws Exception {
+	void rejectsEventWhereSuccessContradictsHttpStatus() throws Exception {
 		String payload = canonicalPayloadWith((event) -> {
 			event.put("httpStatus", 200);
 			event.put("success", false);
@@ -305,7 +306,7 @@ class TelemetryKafkaConsumerIntegrationTest {
 		ILoggingEvent log = publishAndAwaitLog(PRODUCT_EVENT_KEY, payload);
 
 		assertThat(log.getLevel()).isEqualTo(Level.WARN);
-		assertThat(log.getFormattedMessage()).contains(SKIP_LOG_MARKER).contains("success");
+		assertThat(log.getFormattedMessage()).contains(REJECT_LOG_MARKER).contains("success");
 	}
 
 	// --- Offset 진행 --------------------------------------------------------

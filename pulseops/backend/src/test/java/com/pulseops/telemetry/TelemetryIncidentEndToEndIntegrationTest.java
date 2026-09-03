@@ -12,6 +12,7 @@ import com.pulseops.incident.IncidentRepository;
 import com.pulseops.incident.IncidentSeverity;
 import com.pulseops.incident.IncidentStatus;
 import com.pulseops.incident.IncidentType;
+import com.pulseops.metric.MetricRecordOutcome;
 import com.pulseops.metric.MetricRecorder;
 import com.pulseops.metric.MetricSeries;
 import com.pulseops.metric.MetricSnapshot;
@@ -374,7 +375,7 @@ class TelemetryIncidentEndToEndIntegrationTest {
 				rememberKeys(series, eventId, occurredAt);
 				assertThat(this.metricRecorder.record(event(series, eventId, occurredAt, ERROR_STATUS)))
 					.as("Metric에 반영되지 않은 Event가 있으면 창의 값이 어긋난다. occurredAt=%s", occurredAt)
-					.isTrue();
+					.isEqualTo(MetricRecordOutcome.APPLIED);
 			}
 		}
 	}

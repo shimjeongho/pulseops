@@ -6,10 +6,7 @@ import com.pulseops.metric.MetricWindow;
 import com.pulseops.metric.RollingMetricService;
 import java.time.Instant;
 import java.util.Optional;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -62,8 +59,6 @@ public class IncidentDetector {
 	 */
 	private static final int RECOVERY_TRIGGER_COUNT = 3;
 
-	private static final Logger logger = LoggerFactory.getLogger(IncidentDetector.class);
-
 	private final RollingMetricService rollingMetricService;
 
 	private final DetectionStateRepository detectionStateRepository;
@@ -87,33 +82,16 @@ public class IncidentDetector {
 	/**
 	 * 한 계열의 마지막으로 닫힌 창을 판정하고 그 결과를 남긴다.
 	 * <p>
-	 * Redis를 읽지 못하거나 MySQL이 응답하지 않으면 이번 판정을 건너뛰고 예외를 밖으로 내보내지
-	 * 않는다. 관측을 남기지 못하는 것은 손실이지만, 그 때문에 Kafka 소비가 같은 자리에서 멈추면
-	 * 그 뒤의 모든 Metric까지 함께 잃는다.
+	 * Redis를 읽지 못하거나 MySQL이 응답하지 않으면 예외를 그대로 올려 보낸다. Phase 4에서는 삼켰다.
+	 * 예외가 나가면 Kafka 소비가 같은 자리에 멈추는 것 말고는 할 수 있는 일이 없었기 때문이다. 이제는
+	 * Consumer에 제한된 재시도와 DLT가 있어, 몇 초 뒤 같은 Event로 판정을 다시 시도할 수 있다.
 	 * <p>
-	 * 건너뛴 창은 cursor를 올리지 않으므로 사라지지 않는다. Redis에 Bucket이 남아 있는 동안 다음
-	 * 판정이 같은 창을 다시 읽을 수 있어, 실패의 대가는 유실이 아니라 지연이다.
+	 * 다시 불러도 안전하다. 이 판정은 cursor가 가리키는 창만 진행시키므로, 이미 진행된 창을 다시
+	 * 판정해도 아무것도 달라지지 않는다.
 	 */
 	public void detect(MetricSeries series, Instant evaluationNow) {
-		MetricSnapshot snapshot;
-		try {
-			snapshot = this.rollingMetricService.snapshot(series, lastClosedWindowReference(evaluationNow));
-		}
-		catch (DataAccessException ex) {
-			logger.warn("Redis에서 Metric을 읽지 못해 Incident 판정을 건너뛴다. series={} evaluationNow={} reason={}", series,
-					evaluationNow, ex.getClass().getSimpleName());
-			return;
-		}
-		try {
-			this.transactionTemplate.executeWithoutResult((status) -> evaluate(series, snapshot));
-		}
-		// MySQL 쪽 실패만 흡수한다. 여기에는 최초 상태를 만들 때의 identity 충돌도 들어간다.
-		// RuntimeException까지 잡으면 판정 규칙의 결함이 조용히 묻히고, 열려야 할 Incident가 열리지
-		// 않은 것을 아무도 알 수 없게 된다.
-		catch (DataAccessException ex) {
-			logger.warn("MySQL에 판정 결과를 남기지 못해 Incident 판정을 건너뛴다. series={} windowEnd={} reason={}", series,
-					snapshot.windowEnd(), ex.getClass().getSimpleName());
-		}
+		MetricSnapshot snapshot = this.rollingMetricService.snapshot(series, lastClosedWindowReference(evaluationNow));
+		this.transactionTemplate.executeWithoutResult((status) -> evaluate(series, snapshot));
 	}
 
 	/**

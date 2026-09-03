@@ -1,6 +1,7 @@
 package com.pulseops.metric;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -41,8 +42,6 @@ class MetricRecorderTest {
 
 	private static final String EVENT_ID = "3f1c8a27-6b90-4d1e-9c44-72b0d5e19a2b";
 
-	private static final String REDIS_FAILURE_LOG_MARKER = "Redis에 Metric을 기록하지 못해";
-
 	private final RedisMetricStore metricStore = mock(RedisMetricStore.class);
 
 	private final MetricRecorder recorder = new MetricRecorder(this.metricStore);
@@ -76,7 +75,7 @@ class MetricRecorderTest {
 	void reportsThatTheMetricChanged() {
 		givenStoreApplied(true);
 
-		assertThat(this.recorder.record(event(NOW, 200, 12L), NOW)).isTrue();
+		assertThat(this.recorder.record(event(NOW, 200, 12L), NOW)).isEqualTo(MetricRecordOutcome.APPLIED);
 	}
 
 	/**
@@ -87,8 +86,8 @@ class MetricRecorderTest {
 	void reportsThatARedeliveredEventChangedNothing() {
 		given(this.metricStore.record(any(), any(), any(), anyBoolean(), anyLong())).willReturn(true, false);
 
-		assertThat(this.recorder.record(event(NOW, 200, 12L), NOW)).isTrue();
-		assertThat(this.recorder.record(event(NOW, 200, 12L), NOW)).isFalse();
+		assertThat(this.recorder.record(event(NOW, 200, 12L), NOW)).isEqualTo(MetricRecordOutcome.APPLIED);
+		assertThat(this.recorder.record(event(NOW, 200, 12L), NOW)).isEqualTo(MetricRecordOutcome.DUPLICATE);
 	}
 
 	@Test
@@ -114,7 +113,8 @@ class MetricRecorderTest {
 
 	@Test
 	void skipsEventOlderThanTheAcceptWindow() {
-		assertThat(this.recorder.record(event(NOW.minusSeconds(301), 200, 12L), NOW)).isFalse();
+		assertThat(this.recorder.record(event(NOW.minusSeconds(301), 200, 12L), NOW))
+			.isEqualTo(MetricRecordOutcome.OUT_OF_WINDOW);
 
 		then(this.metricStore).shouldHaveNoInteractions();
 	}
@@ -123,14 +123,16 @@ class MetricRecorderTest {
 	void recordsEventAtTheOldestAcceptedInstant() {
 		givenStoreApplied(true);
 
-		assertThat(this.recorder.record(event(NOW.minusSeconds(300), 200, 12L), NOW)).isTrue();
+		assertThat(this.recorder.record(event(NOW.minusSeconds(300), 200, 12L), NOW))
+			.isEqualTo(MetricRecordOutcome.APPLIED);
 
 		then(this.metricStore).should().record(any(), any(), any(), anyBoolean(), anyLong());
 	}
 
 	@Test
 	void skipsEventTooFarInTheFuture() {
-		assertThat(this.recorder.record(event(NOW.plusSeconds(6), 200, 12L), NOW)).isFalse();
+		assertThat(this.recorder.record(event(NOW.plusSeconds(6), 200, 12L), NOW))
+			.isEqualTo(MetricRecordOutcome.OUT_OF_WINDOW);
 
 		then(this.metricStore).shouldHaveNoInteractions();
 	}
@@ -139,7 +141,8 @@ class MetricRecorderTest {
 	void recordsEventAtTheFurthestAcceptedFutureInstant() {
 		givenStoreApplied(true);
 
-		assertThat(this.recorder.record(event(NOW.plusSeconds(5), 200, 12L), NOW)).isTrue();
+		assertThat(this.recorder.record(event(NOW.plusSeconds(5), 200, 12L), NOW))
+			.isEqualTo(MetricRecordOutcome.APPLIED);
 
 		then(this.metricStore).should().record(any(), any(), any(), anyBoolean(), anyLong());
 	}
@@ -152,36 +155,34 @@ class MetricRecorderTest {
 	void acceptsAnAlreadyRecordedEventWithoutWarning(CapturedOutput output) {
 		givenStoreApplied(false);
 
-		assertThat(this.recorder.record(event(NOW, 200, 12L), NOW)).isFalse();
+		assertThat(this.recorder.record(event(NOW, 200, 12L), NOW)).isEqualTo(MetricRecordOutcome.DUPLICATE);
 
-		assertThat(output).doesNotContain(REDIS_FAILURE_LOG_MARKER);
-	}
-
-	/** Metric을 남기지 못한 것이 Event 처리 실패가 되면 Consumer가 같은 offset에서 멈춘다. */
-	@Test
-	void absorbsRedisFailure(CapturedOutput output) {
-		given(this.metricStore.record(any(), any(), any(), anyBoolean(), anyLong()))
-			.willThrow(new RedisConnectionFailureException("Redis에 연결할 수 없다"));
-
-		assertThat(this.recorder.record(event(NOW, 200, 12L), NOW)).isFalse();
-
-		assertThat(output).contains(REDIS_FAILURE_LOG_MARKER).contains(EVENT_ID);
-	}
-
-	@Test
-	void absorbsRedisScriptFailure(CapturedOutput output) {
-		given(this.metricStore.record(any(), any(), any(), anyBoolean(), anyLong()))
-			.willThrow(new RedisSystemException("script 실행에 실패했다", new IllegalStateException("Lua error")));
-
-		assertThat(this.recorder.record(event(NOW, 200, 12L), NOW)).isFalse();
-
-		assertThat(output).contains(REDIS_FAILURE_LOG_MARKER);
+		assertThat(output).doesNotContain("WARN");
 	}
 
 	/**
-	 * Redis 장애만 흡수한다. 나머지까지 삼키면 Metric 계층의 결함이 log 한 줄로 묻히고 잘못된 값이
-	 * 정상처럼 쌓인다.
+	 * Redis 장애를 결과 값으로 바꾸지 않는다. 여기서 삼키면 Redis가 잠깐 흔들린 구간의 Event가 영구히
+	 * 사라지지만, 올려 보내면 Consumer의 재시도가 같은 Event를 다시 반영할 수 있다.
 	 */
+	@Test
+	void propagatesRedisConnectionFailureSoTheConsumerCanRetry() {
+		given(this.metricStore.record(any(), any(), any(), anyBoolean(), anyLong()))
+			.willThrow(new RedisConnectionFailureException("Redis에 연결할 수 없다"));
+
+		assertThatExceptionOfType(RedisConnectionFailureException.class)
+			.isThrownBy(() -> this.recorder.record(event(NOW, 200, 12L), NOW));
+	}
+
+	@Test
+	void propagatesRedisScriptFailureSoTheConsumerCanRetry() {
+		given(this.metricStore.record(any(), any(), any(), anyBoolean(), anyLong()))
+			.willThrow(new RedisSystemException("script 실행에 실패했다", new IllegalStateException("Lua error")));
+
+		assertThatExceptionOfType(RedisSystemException.class)
+			.isThrownBy(() -> this.recorder.record(event(NOW, 200, 12L), NOW));
+	}
+
+	/** 저장소 장애가 아닌 결함도 그대로 올라가야 잘못 계산된 Metric이 정상처럼 쌓이지 않는다. */
 	@Test
 	void doesNotHideFailuresOtherThanRedis() {
 		given(this.metricStore.record(any(), any(), any(), anyBoolean(), anyLong()))

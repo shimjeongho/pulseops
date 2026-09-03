@@ -1,13 +1,14 @@
 package com.pulseops.telemetry;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.mock;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.function.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.BeforeEach;
@@ -25,9 +26,9 @@ import tools.jackson.databind.node.ObjectNode;
 /**
  * Listener가 Kafka Record 하나를 어떻게 처리하는지 Broker 없이 고정한다.
  * <p>
- * 핵심 계약은 "잘못된 Event 때문에 예외가 Listener 밖으로 나가지 않는다"이다. 예외가 나가면 같은
- * offset이 계속 재전달되어 Consumer가 그 자리에서 멈추기 때문이다. 건너뛴 사실은 WARN log로만
- * 남으므로 log 출력까지 함께 확인한다.
+ * 핵심 계약은 "계약을 어긴 Event는 처리로 넘어가지 않고 계약 위반으로 올라간다"이다. Phase 6까지는
+ * log만 남기고 넘어갔지만, 이제는 이 예외를 Consumer 설정이 재시도 없이 DLT로 보낸다. 어떤 규칙이
+ * 깨졌는지는 여전히 WARN log에 남으므로 log 출력까지 함께 확인한다.
  * <p>
  * ObjectMapper는 Spring이 구성한 Bean을 그대로 쓴다. 테스트에서 따로 만든 ObjectMapper로 검증하면
  * 실제 Application의 역직렬화 동작과 달라질 수 있다.
@@ -38,7 +39,7 @@ class TelemetryEventListenerTest {
 
 	private static final String FIXTURE_PATH = "telemetry/telemetry-event-v1.json";
 
-	private static final String SKIP_LOG_MARKER = "Telemetry Event를 건너뛴다";
+	private static final String REJECT_LOG_MARKER = "계약을 어긴 Telemetry Event를 DLT로 보낸다";
 
 	private static final String RECORD_KEY = "demo-shop:/api/payments";
 
@@ -63,42 +64,48 @@ class TelemetryEventListenerTest {
 	void acceptsCanonicalEvent(CapturedOutput output) throws IOException {
 		consume(readCanonicalFixture());
 
-		assertThat(output).doesNotContain(SKIP_LOG_MARKER);
+		assertThat(output).doesNotContain(REJECT_LOG_MARKER);
 	}
 
 	@Test
-	void skipsMalformedJson(CapturedOutput output) {
-		assertThatCode(() -> consume("{not-json")).doesNotThrowAnyException();
+	void rejectsMalformedJson(CapturedOutput output) {
+		assertThatExceptionOfType(TelemetryEventContractException.class).isThrownBy(() -> consume("{not-json"));
 
-		assertThat(output).contains(SKIP_LOG_MARKER).contains("offset=" + OFFSET);
+		assertThat(output).contains(REJECT_LOG_MARKER).contains("offset=" + OFFSET);
 	}
 
 	@Test
-	void skipsRecordWithoutPayload(CapturedOutput output) {
-		assertThatCode(() -> consume(null)).doesNotThrowAnyException();
+	void rejectsRecordWithoutPayload(CapturedOutput output) {
+		assertThatExceptionOfType(TelemetryEventContractException.class).isThrownBy(() -> consume(null));
 
-		assertThat(output).contains(SKIP_LOG_MARKER);
+		assertThat(output).contains(REJECT_LOG_MARKER);
 	}
 
 	@Test
-	void skipsUnsupportedSchemaVersion(CapturedOutput output) throws IOException {
-		consume(canonicalPayloadWith((payload) -> payload.put("schemaVersion", 2)));
+	void rejectsUnsupportedSchemaVersion(CapturedOutput output) throws IOException {
+		String payload = canonicalPayloadWith((event) -> event.put("schemaVersion", 2));
 
-		assertThat(output).contains(SKIP_LOG_MARKER).contains("schemaVersion");
+		assertThatExceptionOfType(TelemetryEventContractException.class).isThrownBy(() -> consume(payload));
+
+		assertThat(output).contains(REJECT_LOG_MARKER).contains("schemaVersion");
 	}
 
 	@Test
-	void skipsEventWithBlankRequiredField(CapturedOutput output) throws IOException {
-		consume(canonicalPayloadWith((payload) -> payload.put("endpoint", "  ")));
+	void rejectsEventWithBlankRequiredField(CapturedOutput output) throws IOException {
+		String payload = canonicalPayloadWith((event) -> event.put("endpoint", "  "));
 
-		assertThat(output).contains(SKIP_LOG_MARKER).contains("endpoint");
+		assertThatExceptionOfType(TelemetryEventContractException.class).isThrownBy(() -> consume(payload));
+
+		assertThat(output).contains(REJECT_LOG_MARKER).contains("endpoint");
 	}
 
 	@Test
-	void skipsEventWithNegativeLatency(CapturedOutput output) throws IOException {
-		consume(canonicalPayloadWith((payload) -> payload.put("latencyMs", -1)));
+	void rejectsEventWithNegativeLatency(CapturedOutput output) throws IOException {
+		String payload = canonicalPayloadWith((event) -> event.put("latencyMs", -1));
 
-		assertThat(output).contains(SKIP_LOG_MARKER).contains("latencyMs");
+		assertThatExceptionOfType(TelemetryEventContractException.class).isThrownBy(() -> consume(payload));
+
+		assertThat(output).contains(REJECT_LOG_MARKER).contains("latencyMs");
 	}
 
 	/**
@@ -106,10 +113,12 @@ class TelemetryEventListenerTest {
 	 * 존재 검증이 먼저 잡아야 결측과 실제 값 0을 구분한 채로 사유가 남는다.
 	 */
 	@Test
-	void skipsPayloadMissingHttpStatus(CapturedOutput output) throws IOException {
-		consume(canonicalPayloadWith((payload) -> payload.remove("httpStatus")));
+	void rejectsPayloadMissingHttpStatus(CapturedOutput output) throws IOException {
+		String payload = canonicalPayloadWith((event) -> event.remove("httpStatus"));
 
-		assertThat(output).contains(SKIP_LOG_MARKER).contains("필수 필드 누락: httpStatus");
+		assertThatExceptionOfType(TelemetryEventContractException.class).isThrownBy(() -> consume(payload));
+
+		assertThat(output).contains(REJECT_LOG_MARKER).contains("필수 필드 누락: httpStatus");
 	}
 
 	/**
@@ -117,10 +126,12 @@ class TelemetryEventListenerTest {
 	 * 필드 존재 검증이 없으면 계약을 어긴 Event가 정상 Event로 통과한다.
 	 */
 	@Test
-	void skipsPayloadMissingFieldsThatHaveValidPrimitiveDefaults(CapturedOutput output) throws IOException {
-		consume(canonicalPayloadWith((payload) -> payload.remove("latencyMs")));
-		consume(canonicalPayloadWith((payload) -> payload.remove("success")));
-		consume(canonicalPayloadWith((payload) -> payload.remove("errorMessage")));
+	void rejectsPayloadMissingFieldsThatHaveValidPrimitiveDefaults(CapturedOutput output) throws IOException {
+		for (String missing : List.of("latencyMs", "success", "errorMessage")) {
+			String payload = canonicalPayloadWith((event) -> event.remove(missing));
+
+			assertThatExceptionOfType(TelemetryEventContractException.class).isThrownBy(() -> consume(payload));
+		}
 
 		assertThat(output).contains("필수 필드 누락: latencyMs")
 			.contains("필수 필드 누락: success")
@@ -128,18 +139,19 @@ class TelemetryEventListenerTest {
 	}
 
 	@Test
-	void skipsEventWithUnreadableOccurredAt(CapturedOutput output) throws IOException {
-		assertThatCode(() -> consume(canonicalPayloadWith((payload) -> payload.put("occurredAt", "어제"))))
-			.doesNotThrowAnyException();
+	void rejectsEventWithUnreadableOccurredAt(CapturedOutput output) throws IOException {
+		String payload = canonicalPayloadWith((event) -> event.put("occurredAt", "어제"));
 
-		assertThat(output).contains(SKIP_LOG_MARKER);
+		assertThatExceptionOfType(TelemetryEventContractException.class).isThrownBy(() -> consume(payload));
+
+		assertThat(output).contains(REJECT_LOG_MARKER);
 	}
 
 	@Test
 	void acceptsEventCarryingAnUnknownFieldFromAFutureProducer(CapturedOutput output) throws IOException {
 		consume(canonicalPayloadWith((payload) -> payload.put("newField", "value")));
 
-		assertThat(output).doesNotContain(SKIP_LOG_MARKER);
+		assertThat(output).doesNotContain(REJECT_LOG_MARKER);
 	}
 
 	/**
@@ -147,12 +159,12 @@ class TelemetryEventListenerTest {
 	 * 그대로 담긴다. 두 경로 모두 log로 새면 안 되므로 payload 원문 없이 좌표만 남는지 확인한다.
 	 */
 	@Test
-	void neverWritesThePayloadIntoTheSkipLog(CapturedOutput output) throws IOException {
+	void neverWritesThePayloadIntoTheRejectLog(CapturedOutput output) throws IOException {
 		String payload = canonicalPayloadWith((node) -> node.put("schemaVersion", 2));
 
-		consume(payload);
+		assertThatExceptionOfType(TelemetryEventContractException.class).isThrownBy(() -> consume(payload));
 
-		assertThat(output).contains(SKIP_LOG_MARKER)
+		assertThat(output).contains(REJECT_LOG_MARKER)
 			.doesNotContain("이미 결제가 완료된 주문입니다.")
 			.doesNotContain("ORDER_ALREADY_PAID")
 			.doesNotContain("3f1c8a27-6b90-4d1e-9c44-72b0d5e19a2b")
@@ -183,12 +195,17 @@ class TelemetryEventListenerTest {
 	 */
 	@Test
 	void neverHandsAnInvalidEventToTheProcessingService() throws IOException {
-		consume(null);
-		consume("{not-json");
-		consume(canonicalPayloadWith((payload) -> payload.put("schemaVersion", 2)));
-		consume(canonicalPayloadWith((payload) -> payload.remove("httpStatus")));
-		consume(canonicalPayloadWith((payload) -> payload.put("latencyMs", -1)));
-		consume(canonicalPayloadWith((payload) -> payload.put("endpoint", "  ")));
+		List<String> invalidPayloads = new java.util.ArrayList<>();
+		invalidPayloads.add(null);
+		invalidPayloads.add("{not-json");
+		invalidPayloads.add(canonicalPayloadWith((payload) -> payload.put("schemaVersion", 2)));
+		invalidPayloads.add(canonicalPayloadWith((payload) -> payload.remove("httpStatus")));
+		invalidPayloads.add(canonicalPayloadWith((payload) -> payload.put("latencyMs", -1)));
+		invalidPayloads.add(canonicalPayloadWith((payload) -> payload.put("endpoint", "  ")));
+
+		for (String payload : invalidPayloads) {
+			assertThatExceptionOfType(TelemetryEventContractException.class).isThrownBy(() -> consume(payload));
+		}
 
 		then(this.processingService).shouldHaveNoInteractions();
 	}

@@ -25,6 +25,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataAccessException;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Import;
@@ -111,11 +112,17 @@ class IncidentDetectorConcurrencyIntegrationTest {
 	/**
 	 * 상태가 아직 없을 때가 가장 위험한 자리다. 잠글 행이 없어 두 흐름이 나란히 "없다"를 볼 수 있고,
 	 * 그때 상태가 둘로 갈라지면 연속 횟수가 나뉘어 어느 쪽도 기준에 닿지 못한다.
+	 * <p>
+	 * 충돌한 흐름은 이번 판정을 잃고 실패한다. Phase 4에서는 그 실패를 삼켰지만 이제는 올려 보낸다.
+	 * 진 쪽의 판정은 Kafka 재시도가 다시 부르고, 그때는 상태 행이 이미 있어 잠그고 이어 갈 수 있다.
+	 * 여기서 지켜야 할 것은 "상태가 둘로 갈라지지 않는다"이며 그것은 그대로다.
 	 */
 	@Test
 	void createsAtMostOneStatePerTypeWhenTheSeriesIsSeenForTheFirstTime() {
-		detectConcurrently(abnormal(WINDOW_1));
+		List<Throwable> failures = detectConcurrently(abnormal(WINDOW_1));
 
+		// 진 쪽이 있었다면 그 실패는 재시도할 수 있는 저장소 실패여야 한다.
+		assertThat(failures).allSatisfy((failure) -> assertThat(failure).isInstanceOf(DataAccessException.class));
 		assertThat(this.detectionStateRepository.findAll()).hasSize(IncidentType.values().length)
 			.allSatisfy((state) -> {
 				assertThat(state.getLastEvaluatedWindowEnd()).isEqualTo(WINDOW_1);
@@ -134,7 +141,8 @@ class IncidentDetectorConcurrencyIntegrationTest {
 	void opensExactlyOneIncidentWhenTheTriggeringWindowIsDetectedTwiceAtOnce() {
 		detectOnce(abnormal(WINDOW_1));
 
-		detectConcurrently(abnormal(WINDOW_2));
+		// 상태 행이 이미 있어 두 흐름 모두 잠그고 지나간다. 여기서는 아무도 실패하지 않아야 한다.
+		assertThat(detectConcurrently(abnormal(WINDOW_2))).isEmpty();
 
 		assertThat(this.incidentRepository.findAll()).hasSize(IncidentType.values().length)
 			.allSatisfy((incident) -> assertThat(incident.getStatus()).isEqualTo(IncidentStatus.OPEN))
@@ -153,10 +161,12 @@ class IncidentDetectorConcurrencyIntegrationTest {
 	}
 
 	/**
-	 * 두 흐름을 같은 지점에서 출발시키고 둘 다 끝날 때까지 기다린다. Detection이 예외를 밖으로
-	 * 내보내지 않는 것도 함께 확인되는데, {@link Future#get}이 그 예외를 그대로 다시 던지기 때문이다.
+	 * 두 흐름을 같은 지점에서 출발시키고 둘 다 끝날 때까지 기다린 뒤, 밖으로 나온 실패를 모아 돌려준다.
+	 * <p>
+	 * 실패를 여기서 다시 던지지 않는다. Phase 7부터 판정 실패는 Kafka 재시도가 받는 정상적인 결과라,
+	 * 어떤 실패가 몇 개 나왔는지는 검증마다 다르게 판단해야 한다.
 	 */
-	private void detectConcurrently(MetricSnapshot snapshot) {
+	private List<Throwable> detectConcurrently(MetricSnapshot snapshot) {
 		given(this.rollingMetricService.snapshot(eq(SERIES), any())).willReturn(snapshot);
 		Instant evaluationNow = evaluationNowFor(snapshot);
 		CyclicBarrier startTogether = new CyclicBarrier(CONCURRENT_DETECTIONS);
@@ -170,7 +180,7 @@ class IncidentDetectorConcurrencyIntegrationTest {
 					return null;
 				});
 			}
-			awaitAll(executor.invokeAll(detections, WAIT_SECONDS, TimeUnit.SECONDS));
+			return failuresOf(executor.invokeAll(detections, WAIT_SECONDS, TimeUnit.SECONDS));
 		}
 		catch (InterruptedException ex) {
 			Thread.currentThread().interrupt();
@@ -181,15 +191,17 @@ class IncidentDetectorConcurrencyIntegrationTest {
 		}
 	}
 
-	private static void awaitAll(List<Future<Void>> detections) throws InterruptedException {
+	private static List<Throwable> failuresOf(List<Future<Void>> detections) throws InterruptedException {
+		List<Throwable> failures = new ArrayList<>();
 		for (Future<Void> detection : detections) {
 			try {
 				detection.get();
 			}
 			catch (ExecutionException ex) {
-				throw new IllegalStateException("동시 판정 중 예외가 밖으로 나왔다", ex.getCause());
+				failures.add(ex.getCause());
 			}
 		}
+		return failures;
 	}
 
 	/** 판정할 창이 막 닫히고 다음 Bucket이 채워지는 중인 시각이다. */
