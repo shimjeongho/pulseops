@@ -69,3 +69,17 @@ export function statusLabel(status) {
 export function incidentTypeLabel(type) {
   return TYPE_LABELS[type] ?? type
 }
+
+/**
+ * AI 분석이 자기 가설을 얼마나 믿는지이다. 정답률이 아니라 근거의 두께에 대한 표시이므로, 확률처럼
+ * 읽히는 숫자를 만들지 않는다.
+ */
+const CONFIDENCE_LABELS = {
+  LOW: '낮음',
+  MEDIUM: '보통',
+  HIGH: '높음',
+}
+
+export function confidenceLabel(confidence) {
+  return CONFIDENCE_LABELS[confidence] ?? confidence
+}

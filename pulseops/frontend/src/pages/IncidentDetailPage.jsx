@@ -6,6 +6,7 @@ import { DetailField } from '../components/DetailField.jsx'
 import { EmptyState } from '../components/EmptyState.jsx'
 import { ErrorMessage } from '../components/ErrorMessage.jsx'
 import { IncidentAcknowledgeAction } from '../components/IncidentAcknowledgeAction.jsx'
+import { IncidentAiAnalysisSection } from '../components/IncidentAiAnalysisSection.jsx'
 import { IncidentStatusBadge } from '../components/IncidentStatusBadge.jsx'
 import { Loading } from '../components/Loading.jsx'
 import { SeverityBadge } from '../components/SeverityBadge.jsx'
@@ -248,6 +249,9 @@ export function IncidentDetailPage() {
           <DetailField label="P95 응답 시간">{formatLatencyMs(incident.triggerP95LatencyMs)}</DetailField>
         </dl>
       </section>
+
+      {/* 판정 근거 아래에 둔다. 관측된 사실을 먼저 보여 준 뒤에 그것을 읽은 추론이 와야 한다. */}
+      <IncidentAiAnalysisSection incidentId={incidentId} />
     </>
   )
 }

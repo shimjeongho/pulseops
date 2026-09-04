@@ -1,5 +1,7 @@
 package com.pulseops.common.exception;
 
+import com.pulseops.analysis.IncidentAiAnalysisNotFoundException;
+import com.pulseops.analysis.IncidentAnalysisUnavailableException;
 import com.pulseops.incident.IncidentAcknowledgeNotAllowedException;
 import com.pulseops.incident.IncidentNotFoundException;
 import com.pulseops.metric.MetricStoreUnavailableException;
@@ -101,6 +103,41 @@ public class GlobalExceptionHandler {
 	public ResponseEntity<ErrorResponse> handleDailyIncidentReportNotFound(
 			DailyIncidentReportNotFoundException exception, HttpServletRequest request) {
 		return build(HttpStatus.NOT_FOUND, "DAILY_REPORT_NOT_FOUND", "Daily Report를 찾을 수 없습니다.", request);
+	}
+
+	/**
+	 * 요청한 Incident에 아직 AI 분석이 없다. Incident를 찾지 못한 것과 같은 성격이라 404이며 마찬가지로
+	 * log를 남기지 않는다. 아직 아무도 분석을 요청하지 않은 Incident를 물어보는 것은 정상적인 요청이고,
+	 * 화면은 이 답을 받아 분석 생성 버튼을 그린다.
+	 * <p>
+	 * Incident가 없는 것과 code를 나눈다. 둘을 합치면 화면이 "없는 Incident"와 "아직 분석하지 않은
+	 * Incident"를 구분하지 못해, 버튼을 보여 줘야 할 자리에 Incident를 찾을 수 없다는 문구를 그린다.
+	 */
+	@ExceptionHandler(IncidentAiAnalysisNotFoundException.class)
+	public ResponseEntity<ErrorResponse> handleIncidentAiAnalysisNotFound(
+			IncidentAiAnalysisNotFoundException exception, HttpServletRequest request) {
+		return build(HttpStatus.NOT_FOUND, "INCIDENT_ANALYSIS_NOT_FOUND", "Incident의 AI 분석을 찾을 수 없습니다.",
+				request);
+	}
+
+	/**
+	 * 지금은 AI 분석을 만들 수 없다. 기능이 꺼져 있는 경우와 외부 provider 호출이 실패한 경우, 응답을
+	 * 분석으로 쓸 수 없는 경우가 모두 여기로 온다. Metric 저장소를 읽지 못하는 것과 같은 성격이라 503이다.
+	 * <p>
+	 * 셋을 한 code로 답한다. Client가 셋을 나눠 받아도 할 수 있는 일이 같기 때문이다. 셋 다 지금은 안
+	 * 되니 나중에 다시라는 뜻이며, 나누면 서버가 기능을 켜 두었는지가 API 계약이 되어 설정을 바꾸는 것
+	 * 만으로 Client가 보는 응답이 달라진다.
+	 * <p>
+	 * message에 provider가 돌려준 문장을 담지 않는다. 거기에는 요청 내용이나 계정 사정이 담겨 올 수
+	 * 있고, 읽는 사람이 그것으로 할 수 있는 일도 없다. 무엇 때문에 실패했는지는 예외가 들고 온 짧은
+	 * 고정 문자열로 log에만 남긴다.
+	 */
+	@ExceptionHandler(IncidentAnalysisUnavailableException.class)
+	public ResponseEntity<ErrorResponse> handleIncidentAnalysisUnavailable(
+			IncidentAnalysisUnavailableException exception, HttpServletRequest request) {
+		logger.warn("AI 분석을 만들지 못했다. path={} reason={}", request.getRequestURI(), exception.getReason());
+		return build(HttpStatus.SERVICE_UNAVAILABLE, "AI_ANALYSIS_UNAVAILABLE", "AI 분석 서비스를 현재 사용할 수 없습니다.",
+				request);
 	}
 
 	/**

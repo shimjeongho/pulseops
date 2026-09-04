@@ -492,3 +492,55 @@ a {
     padding-top: 20px;
   }
 }
+
+/* --- AI 분석 ------------------------------------------------------------- */
+
+.analysis-summary {
+  margin: 0 0 16px;
+  font-size: 15px;
+}
+
+.analysis-hypothesis {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  background: var(--notice-bg);
+  border: 1px solid var(--notice-border);
+  border-radius: 8px;
+}
+
+.analysis-block {
+  margin-bottom: 16px;
+}
+
+.analysis-subtitle {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.analysis-text {
+  margin: 0;
+}
+
+.analysis-confidence {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.analysis-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 14px;
+}
+
+.analysis-list li + li {
+  margin-top: 4px;
+}
+
+.analysis-origin {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}

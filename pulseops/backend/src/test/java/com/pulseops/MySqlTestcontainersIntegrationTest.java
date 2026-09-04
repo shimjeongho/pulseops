@@ -91,7 +91,8 @@ class MySqlTestcontainersIntegrationTest {
 				"SELECT script FROM flyway_schema_history WHERE success = TRUE ORDER BY installed_rank", String.class);
 
 		assertThat(appliedScripts).containsExactly("V1__create_incident_table.sql",
-				"V2__create_detection_state_table.sql", "V3__create_daily_incident_report_table.sql");
+				"V2__create_detection_state_table.sql", "V3__create_daily_incident_report_table.sql",
+				"V4__create_incident_ai_analysis_table.sql");
 	}
 
 	@Test

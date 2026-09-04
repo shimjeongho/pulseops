@@ -1,0 +1,42 @@
+{
+  "type": "object",
+  "properties": {
+    "summary": {
+      "type": "string",
+      "description": "관측된 Incident가 어떤 상황인지 사실 위주로 요약한다. 3문장 이내."
+    },
+    "primaryHypothesis": {
+      "type": "string",
+      "description": "가장 그럴듯한 원인 가설 하나. 확정된 원인이 아니라 가설로 서술한다. 2문장 이내."
+    },
+    "confidence": {
+      "type": "string",
+      "enum": ["LOW", "MEDIUM", "HIGH"],
+      "description": "주어진 관측만으로 이 가설을 얼마나 지지할 수 있는지."
+    },
+    "evidence": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "입력으로 주어진 Incident 사실만 근거로 인용한다. 최대 5개."
+    },
+    "recommendedActions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "사람이 다음에 확인하거나 진단할 항목. 최대 5개."
+    },
+    "limitations": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "이 분석이 보지 못한 것과 그래서 말할 수 없는 것. 최소 1개, 최대 5개."
+    }
+  },
+  "required": [
+    "summary",
+    "primaryHypothesis",
+    "confidence",
+    "evidence",
+    "recommendedActions",
+    "limitations"
+  ],
+  "additionalProperties": false
+}
