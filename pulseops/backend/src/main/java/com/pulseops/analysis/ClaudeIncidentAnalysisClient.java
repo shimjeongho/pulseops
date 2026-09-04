@@ -1,5 +1,6 @@
 package com.pulseops.analysis;
 
+import com.pulseops.github.GitHubCodeContext;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,6 +26,10 @@ import tools.jackson.databind.json.JsonMapper;
  * rate limit을 곱으로 늘리는데, 이 호출은 사람이 버튼을 눌러 시작한 것이라 다시 시도할 사람이 이미
  * 화면 앞에 있다. Kafka 소비의 재시도와도 아무 관계가 없다. 그쪽은 사람이 없는 자리에서 도는 흐름이라
  * 스스로 다시 시도해야 하지만, 여기는 아니다.
+ * <p>
+ * 두 종류의 분석을 한 Class가 맡는다. 보내는 지시와 사용자 message가 다를 뿐 인증도 호출 방법도 응답을
+ * 검증하는 규칙도 같아서, 나누면 그 규칙이 두 벌이 되고 한쪽만 고쳐진 채로 남는다. 무엇이 다른지는
+ * {@code analyze}와 {@code analyzeWithCode}가 서로 다른 prompt를 넘기는 두 줄에만 있다.
  * <p>
  * 실패의 종류를 응답에 담지 않는다. provider가 돌려준 본문에는 요청 내용이나 계정 사정이 담겨 올 수
  * 있어 그대로 밖으로 내보낼 수 없고, log에도 상태 코드와 provider의 요청 식별자만 남긴다. 이 둘이면
@@ -73,13 +78,30 @@ public class ClaudeIncidentAnalysisClient implements IncidentAnalysisClient {
 	@Override
 	public IncidentAnalysisResult analyze(IncidentAnalysisFacts facts) {
 		String factsJson = IncidentAnalysisPrompt.factsJson(facts);
-		ClaudeMessageResponse response = call(request(factsJson));
-		return toResult(response, factsJson);
+		ClaudeMessageResponse response = call(request(IncidentAnalysisPrompt.SYSTEM_INSTRUCTION,
+				IncidentAnalysisPrompt.userMessage(factsJson)));
+		return toResult(response, factsJson, IncidentAnalysisPrompt.VERSION);
 	}
 
-	private ClaudeMessageRequest request(String factsJson) {
-		return new ClaudeMessageRequest(this.model, MAX_OUTPUT_TOKENS, IncidentAnalysisPrompt.SYSTEM_INSTRUCTION,
-				List.of(new ClaudeMessageRequest.Message(USER_ROLE, IncidentAnalysisPrompt.userMessage(factsJson))),
+	/**
+	 * 코드 맥락까지 함께 보내는 것 말고는 기본 분석과 같다.
+	 * <p>
+	 * 요청을 만들고 응답을 검증하는 자리를 나누지 않는다. 두 분석은 같은 출력 구조를 요구하므로 응답을
+	 * 읽는 규칙도 같고, 그것을 복사해 두면 한쪽만 고쳐졌을 때 두 분석이 서로 다른 기준으로 저장된다.
+	 * 실제로 다른 것은 지시와 사용자 message와 판 번호, 이 셋뿐이며 그래서 그 셋만 인자로 흐른다.
+	 */
+	@Override
+	public IncidentAnalysisResult analyzeWithCode(IncidentAnalysisFacts facts, GitHubCodeContext code) {
+		String factsJson = IncidentAnalysisPrompt.factsJson(facts);
+		String contextJson = IncidentCodeAnalysisPrompt.contextJson(code);
+		ClaudeMessageResponse response = call(request(IncidentCodeAnalysisPrompt.SYSTEM_INSTRUCTION,
+				IncidentCodeAnalysisPrompt.userMessage(factsJson, contextJson)));
+		return toResult(response, factsJson, IncidentCodeAnalysisPrompt.VERSION);
+	}
+
+	private ClaudeMessageRequest request(String systemInstruction, String userMessage) {
+		return new ClaudeMessageRequest(this.model, MAX_OUTPUT_TOKENS, systemInstruction,
+				List.of(new ClaudeMessageRequest.Message(USER_ROLE, userMessage)),
 				new ClaudeMessageRequest.OutputConfig(new ClaudeMessageRequest.Format(
 						ClaudeMessageRequest.Format.JSON_SCHEMA, IncidentAnalysisPrompt.outputSchema())));
 	}
@@ -136,7 +158,7 @@ public class ClaudeIncidentAnalysisClient implements IncidentAnalysisClient {
 	 * model은 설정값이 아니라 응답이 알려 준 값을 쓴다. 설정에는 alias가 들어갈 수 있어, 나중에 어떤
 	 * model의 결과인지 물으면 설정값은 답하지 못한다.
 	 */
-	private IncidentAnalysisResult toResult(ClaudeMessageResponse response, String factsJson) {
+	private IncidentAnalysisResult toResult(ClaudeMessageResponse response, String factsJson, String promptVersion) {
 		if (!ClaudeMessageResponse.STOP_REASON_END_TURN.equals(response.stopReason())) {
 			throw new IncidentAnalysisUnavailableException("provider_incomplete_response", null);
 		}
@@ -144,7 +166,7 @@ public class ClaudeIncidentAnalysisClient implements IncidentAnalysisClient {
 		try {
 			return new IncidentAnalysisResult(payload.summary(), payload.primaryHypothesis(),
 					confidence(payload.confidence()), payload.evidence(), payload.recommendedActions(),
-					payload.limitations(), response.model(), IncidentAnalysisPrompt.VERSION, factsJson);
+					payload.limitations(), response.model(), promptVersion, factsJson);
 		}
 		catch (IllegalArgumentException ex) {
 			logger.warn("Claude 분석이 계약을 지키지 않았다. reason={}", ex.getMessage());

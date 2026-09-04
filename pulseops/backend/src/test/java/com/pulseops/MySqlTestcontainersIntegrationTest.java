@@ -92,7 +92,8 @@ class MySqlTestcontainersIntegrationTest {
 
 		assertThat(appliedScripts).containsExactly("V1__create_incident_table.sql",
 				"V2__create_detection_state_table.sql", "V3__create_daily_incident_report_table.sql",
-				"V4__create_incident_ai_analysis_table.sql");
+				"V4__create_incident_ai_analysis_table.sql", "V5__create_incident_github_context_table.sql",
+				"V6__add_analysis_type_to_incident_ai_analysis.sql");
 	}
 
 	@Test

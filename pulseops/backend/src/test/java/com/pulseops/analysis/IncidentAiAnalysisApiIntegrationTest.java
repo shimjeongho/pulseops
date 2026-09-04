@@ -153,7 +153,7 @@ class IncidentAiAnalysisApiIntegrationTest {
 		JsonNode read = getAnalysis(incident.getId(), status().isOk());
 
 		assertThat(read).isEqualTo(created);
-		assertThat(this.incidentAiAnalysisRepository.findByIncidentId(incident.getId())).isPresent();
+		assertThat(storedAnalysis(incident.getId())).isPresent();
 	}
 
 	@Test
@@ -280,7 +280,7 @@ class IncidentAiAnalysisApiIntegrationTest {
 		this.mockMvc.perform(post("/api/incidents/{incidentId}/acknowledge", incident.getId()))
 			.andExpect(status().isOk());
 
-		String snapshot = this.incidentAiAnalysisRepository.findByIncidentId(incident.getId())
+		String snapshot = storedAnalysis(incident.getId())
 			.orElseThrow()
 			.getInputSnapshot();
 		assertThat(this.objectMapper.readTree(snapshot).get("status").stringValue()).isEqualTo("OPEN");
@@ -295,7 +295,7 @@ class IncidentAiAnalysisApiIntegrationTest {
 
 		createAnalysis(incident.getId(), status().isOk());
 
-		IncidentAiAnalysis stored = this.incidentAiAnalysisRepository.findByIncidentId(incident.getId()).orElseThrow();
+		IncidentAiAnalysis stored = storedAnalysis(incident.getId()).orElseThrow();
 		assertThat(stored.getModel()).isEqualTo("claude-test-model");
 		assertThat(stored.getPromptVersion()).isEqualTo(IncidentAnalysisPrompt.VERSION);
 	}
@@ -345,6 +345,15 @@ class IncidentAiAnalysisApiIntegrationTest {
 			.andReturn()
 			.getResponse()
 			.getContentAsString());
+	}
+
+	/**
+	 * 저장된 기본 분석을 꺼낸다. 조회에 종류를 함께 넘기는 것이 이제 계약이므로 테스트도 같은 자리를
+	 * 지나야 한다. 여기서 종류를 고정해 두면 각 테스트는 무엇을 확인하려 했는지만 남는다.
+	 */
+	private java.util.Optional<IncidentAiAnalysis> storedAnalysis(Long incidentId) {
+		return this.incidentAiAnalysisRepository.findByIncidentIdAndAnalysisType(incidentId,
+				IncidentAnalysisType.INCIDENT_ONLY);
 	}
 
 	private Incident save(Incident incident) {

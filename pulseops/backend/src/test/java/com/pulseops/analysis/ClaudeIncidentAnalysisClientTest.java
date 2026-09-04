@@ -9,6 +9,9 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
+import com.pulseops.github.GitHubCodeContext;
+import com.pulseops.github.GitHubCommit;
+import com.pulseops.github.GitHubSourceFile;
 import com.pulseops.incident.IncidentSeverity;
 import com.pulseops.incident.IncidentStatus;
 import com.pulseops.incident.IncidentType;
@@ -16,6 +19,7 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.net.SocketTimeoutException;
 import java.time.Instant;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -53,6 +57,10 @@ class ClaudeIncidentAnalysisClientTest {
 	private static final String SERVED_MODEL = "claude-opus-5-served";
 
 	private static final String MESSAGES_URL = "https://api.anthropic.com/v1/messages";
+
+	private static final String CODE_PATH = "demo-shop/backend/src/main/java/com/pulseops/demoshop/order/OrderController.java";
+
+	private static final String CODE_SHA = "1111111111111111111111111111111111111111";
 
 	private static final ObjectMapper MAPPER = JsonMapper.builder().build();
 
@@ -335,6 +343,71 @@ class ClaudeIncidentAnalysisClientTest {
 		assertThatExceptionOfType(IncidentAnalysisUnavailableException.class)
 			.isThrownBy(() -> this.client.analyze(errorRateFacts()))
 			.satisfies((ex) -> assertThat(ex.getReason()).isEqualTo("provider_invalid_analysis"));
+	}
+
+	/**
+	 * 코드 맥락까지 보내는 호출은 다른 지시와 다른 판을 쓴다.
+	 * <p>
+	 * 두 분석이 같은 지시를 쓰면 저장된 분석이 무엇을 근거로 만들어졌는지 판 번호로 구분할 수 없다.
+	 * 반대로 출력을 제약하는 Schema는 같아야 한다. 근거가 늘었다고 답의 모양까지 달라질 이유가 없다.
+	 */
+	@Test
+	void sendsTheCodeAwareInstructionAndItsOwnPromptVersion() {
+		AtomicReference<JsonNode> body = expectRequest(response(analysisJson()));
+
+		IncidentAnalysisResult result = this.client.analyzeWithCode(errorRateFacts(), codeContext());
+
+		JsonNode request = body.get();
+		assertThat(request.get("system").stringValue()).isEqualTo(IncidentCodeAnalysisPrompt.SYSTEM_INSTRUCTION);
+		assertThat(request.get("output_config").get("format").get("schema"))
+			.isEqualTo(MAPPER.readTree(IncidentAnalysisPrompt.outputSchema().toString()));
+		assertThat(result.promptVersion()).isEqualTo(IncidentCodeAnalysisPrompt.VERSION);
+	}
+
+	/** 소스 조각과 commit이 실제로 실려 나간다. 근거가 담기지 않으면 코드 기반 분석이 아니다. */
+	@Test
+	void carriesTheSourceSnippetAndTheCommitsIntoTheMessage() {
+		AtomicReference<JsonNode> body = expectRequest(response(analysisJson()));
+
+		this.client.analyzeWithCode(errorRateFacts(), codeContext());
+
+		String content = body.get().get("messages").get(0).get("content").stringValue();
+		assertThat(content).contains(CODE_PATH);
+		assertThat(content).contains("OrderController");
+		assertThat(content).contains(CODE_SHA);
+	}
+
+	/**
+	 * 저장되는 snapshot은 코드 맥락이 아니라 Incident 사실이다. 맥락은 이미 별도의 기록으로 저장되어
+	 * 있고, 분석 행에 한 번 더 복사해 두면 언젠가 두 값이 서로 다른 것을 가리킨다.
+	 */
+	@Test
+	void keepsTheStoredSnapshotAsTheIncidentFacts() {
+		expectRequest(response(analysisJson()));
+
+		IncidentAnalysisResult result = this.client.analyzeWithCode(errorRateFacts(), codeContext());
+
+		assertThat(result.inputSnapshot()).isEqualTo(IncidentAnalysisPrompt.factsJson(errorRateFacts()));
+		assertThat(result.inputSnapshot()).doesNotContain(CODE_SHA);
+	}
+
+	/** 기본 분석은 코드 맥락이 생긴 뒤에도 그대로 자기 지시와 자기 판으로 만들어진다. */
+	@Test
+	void leavesTheBaseAnalysisUntouched() {
+		AtomicReference<JsonNode> body = expectRequest(response(analysisJson()));
+
+		IncidentAnalysisResult result = this.client.analyze(errorRateFacts());
+
+		assertThat(body.get().get("system").stringValue()).isEqualTo(IncidentAnalysisPrompt.SYSTEM_INSTRUCTION);
+		assertThat(result.promptVersion()).isEqualTo(IncidentAnalysisPrompt.VERSION);
+	}
+
+	private static GitHubCodeContext codeContext() {
+		return new GitHubCodeContext("pulseops-test/pulseops", "main", "demo-shop/backend/src/main/java",
+				List.of(new GitHubSourceFile(CODE_PATH, CODE_SHA,
+						"@RequestMapping(\"/api/orders\")\npublic class OrderController {}", true)),
+				List.of(new GitHubCommit(CODE_SHA, "주문 검증을 고쳤다", Instant.parse("2026-09-01T05:00:00Z"),
+						List.of(CODE_PATH))));
 	}
 
 	private AtomicReference<JsonNode> expectRequest(String responseBody) {

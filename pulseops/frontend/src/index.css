@@ -544,3 +544,36 @@ a {
   font-size: 12px;
   color: var(--text-muted);
 }
+
+/* --- 코드 컨텍스트 ------------------------------------------------------- */
+
+.code-context-list {
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+  font-size: 14px;
+}
+
+.code-context-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+/* 경로와 commit message는 길어질 수 있으므로 남는 자리를 차지하되 줄바꿈을 허용한다. */
+.code-context-path {
+  flex: 1 1 240px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+
+.code-context-meta {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--text-muted);
+}

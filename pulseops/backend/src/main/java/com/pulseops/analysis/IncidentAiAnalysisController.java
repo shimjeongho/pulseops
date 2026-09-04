@@ -49,4 +49,31 @@ public class IncidentAiAnalysisController {
 		return this.incidentAiAnalysisService.analyze(incidentId);
 	}
 
+	/**
+	 * 코드 맥락까지 본 분석을 읽는다.
+	 * <p>
+	 * 기본 분석과 경로를 나눈다. 두 분석은 같은 모양의 결과를 돌려주지만 서로 다른 것을 보고 만들어졌고,
+	 * 화면은 그 둘을 나란히 놓고 근거의 차이를 보여 준다. 한 경로에서 질의 값으로 종류를 고르게 하면
+	 * 값을 빠뜨린 요청이 어느 쪽을 뜻하는지 정해지지 않고, 무엇이 있고 없는지도 응답 본문을 열어 봐야
+	 * 알 수 있다.
+	 */
+	@GetMapping("/github")
+	public IncidentAiAnalysisResponse getCodeAnalysis(@PathVariable Long incidentId) {
+		return this.incidentAiAnalysisService.codeAnalysis(incidentId);
+	}
+
+	/**
+	 * 코드 맥락까지 본 분석을 만든다. 본문이 없다.
+	 * <p>
+	 * 이 요청은 GitHub을 부르지 않는다. 근거로 쓸 맥락은 이미 수집되어 저장되어 있어야 하며, 없으면
+	 * 만들지 않고 거절한다. 한 번의 요청으로 외부 저장소와 외부 model을 연달아 부르면 사용자는 그 둘을
+	 * 따로 통제할 수 없고, 어느 쪽이 실패했는지도 하나의 오류로 뭉뚱그려진다.
+	 * <p>
+	 * 새로 만들었을 때와 이미 있을 때를 같은 200으로 답하는 것은 기본 분석과 같다.
+	 */
+	@PostMapping("/github")
+	public IncidentAiAnalysisResponse createCodeAnalysis(@PathVariable Long incidentId) {
+		return this.incidentAiAnalysisService.analyzeWithCode(incidentId);
+	}
+
 }

@@ -2,6 +2,9 @@ package com.pulseops.common.exception;
 
 import com.pulseops.analysis.IncidentAiAnalysisNotFoundException;
 import com.pulseops.analysis.IncidentAnalysisUnavailableException;
+import com.pulseops.github.IncidentGitHubContextEmptyException;
+import com.pulseops.github.IncidentGitHubContextNotFoundException;
+import com.pulseops.github.IncidentGitHubContextUnavailableException;
 import com.pulseops.incident.IncidentAcknowledgeNotAllowedException;
 import com.pulseops.incident.IncidentNotFoundException;
 import com.pulseops.metric.MetricStoreUnavailableException;
@@ -138,6 +141,58 @@ public class GlobalExceptionHandler {
 		logger.warn("AI 분석을 만들지 못했다. path={} reason={}", request.getRequestURI(), exception.getReason());
 		return build(HttpStatus.SERVICE_UNAVAILABLE, "AI_ANALYSIS_UNAVAILABLE", "AI 분석 서비스를 현재 사용할 수 없습니다.",
 				request);
+	}
+
+	/**
+	 * 요청한 Incident에 아직 GitHub 코드 맥락이 없다. Incident를 찾지 못한 것과 같은 성격이라 404이며
+	 * 마찬가지로 log를 남기지 않는다. 아직 아무도 수집을 요청하지 않은 Incident를 물어보는 것은 정상적인
+	 * 요청이고, 화면은 이 답을 받아 수집 버튼을 그린다.
+	 * <p>
+	 * 코드 기반 분석을 요청했는데 맥락이 없을 때도 이 code로 답한다. 그 경우 사용자가 할 일은 분석을
+	 * 다시 누르는 것이 아니라 먼저 맥락을 모으는 것이며, 그 사실을 알리는 데는 같은 code면 충분하다.
+	 */
+	@ExceptionHandler(IncidentGitHubContextNotFoundException.class)
+	public ResponseEntity<ErrorResponse> handleIncidentGitHubContextNotFound(
+			IncidentGitHubContextNotFoundException exception, HttpServletRequest request) {
+		return build(HttpStatus.NOT_FOUND, "GITHUB_CONTEXT_NOT_FOUND", "Incident의 GitHub 코드 컨텍스트를 찾을 수 없습니다.",
+				request);
+	}
+
+	/**
+	 * 맥락은 있지만 관련 source가 하나도 없어 코드 기반 분석을 만들 수 없다. 요청이 잘못된 것도 서버가
+	 * 실패한 것도 아니라 조건이 갖춰지지 않은 것이므로 409이다.
+	 * <p>
+	 * 맥락이 없는 것과 code를 나눈다. 둘을 합치면 화면은 이미 "찾지 못했다"는 결과가 저장되어 있는데도
+	 * 수집 버튼을 다시 그리게 되고, 사용자는 같은 검색을 반복하며 GitHub 한도를 깎는다.
+	 * <p>
+	 * log를 남기지 않는다. 관련 코드를 찾지 못하는 것은 정상적으로 일어나는 결과이고, 그때마다 경고를
+	 * 남기면 실제 장애를 찾을 때 걸러 낼 줄만 늘어난다.
+	 */
+	@ExceptionHandler(IncidentGitHubContextEmptyException.class)
+	public ResponseEntity<ErrorResponse> handleIncidentGitHubContextEmpty(
+			IncidentGitHubContextEmptyException exception, HttpServletRequest request) {
+		return build(HttpStatus.CONFLICT, "GITHUB_CONTEXT_EMPTY", "관련 소스를 찾지 못해 코드 기반 분석을 만들 수 없습니다.",
+				request);
+	}
+
+	/**
+	 * 지금은 GitHub 코드 맥락을 모을 수 없다. 기능이 꺼져 있는 경우와 인증에 실패한 경우, 한도를 넘긴
+	 * 경우, GitHub이 오류를 낸 경우가 모두 여기로 온다. AI 분석을 만들지 못하는 것과 같은 성격이라 503이다.
+	 * <p>
+	 * 전부 한 code로 답한다. Client가 그것들을 나눠 받아도 할 수 있는 일이 같기 때문이다. 나누면 서버가
+	 * token을 갖고 있는지가 API 계약이 되어, 설정을 바꾸는 것만으로 Client가 보는 응답이 달라진다.
+	 * <p>
+	 * message에 GitHub이 돌려준 문장을 담지 않는다. 거기에는 요청 내용이나 계정 사정이 담겨 올 수 있고,
+	 * 읽는 사람이 그것으로 할 수 있는 일도 없다. 무엇 때문에 실패했는지는 예외가 들고 온 짧은 고정
+	 * 문자열로 log에만 남긴다. token은 어느 자리에도 담기지 않는다.
+	 */
+	@ExceptionHandler(IncidentGitHubContextUnavailableException.class)
+	public ResponseEntity<ErrorResponse> handleIncidentGitHubContextUnavailable(
+			IncidentGitHubContextUnavailableException exception, HttpServletRequest request) {
+		logger.warn("GitHub 코드 컨텍스트를 모으지 못했다. path={} reason={}", request.getRequestURI(),
+				exception.getReason());
+		return build(HttpStatus.SERVICE_UNAVAILABLE, "GITHUB_CONTEXT_UNAVAILABLE",
+				"GitHub 코드 컨텍스트를 현재 사용할 수 없습니다.", request);
 	}
 
 	/**

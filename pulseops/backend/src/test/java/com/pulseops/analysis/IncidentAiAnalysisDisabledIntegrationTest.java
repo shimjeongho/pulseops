@@ -110,7 +110,7 @@ class IncidentAiAnalysisDisabledIntegrationTest {
 	@Test
 	void stillServesAnAnalysisThatWasStoredEarlier() throws Exception {
 		Incident incident = save(open());
-		this.incidentAiAnalysisRepository.save(IncidentAiAnalysis.of(incident.getId(), storedResult(), OPENED_AT));
+		this.incidentAiAnalysisRepository.save(IncidentAiAnalysis.incidentOnly(incident.getId(), storedResult(), OPENED_AT));
 
 		JsonNode body = this.objectMapper
 			.readTree(this.mockMvc.perform(get("/api/incidents/{incidentId}/analysis", incident.getId()))

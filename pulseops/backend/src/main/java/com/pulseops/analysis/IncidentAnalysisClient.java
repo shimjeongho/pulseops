@@ -1,5 +1,7 @@
 package com.pulseops.analysis;
 
+import com.pulseops.github.GitHubCodeContext;
+
 /**
  * Incident 사실을 외부 AI에게 보내 분석을 받아 오는 경계이다.
  * <p>
@@ -24,5 +26,18 @@ public interface IncidentAnalysisClient {
 	 * @throws IncidentAnalysisUnavailableException 호출에 실패했거나 응답을 분석으로 쓸 수 없을 때
 	 */
 	IncidentAnalysisResult analyze(IncidentAnalysisFacts facts);
+
+	/**
+	 * 사실과 코드 맥락을 함께 넘겨 분석 하나를 받는다.
+	 * <p>
+	 * 맥락을 인자로 받는다. 이 경계가 GitHub을 직접 부르지 않는다는 뜻이며, 그래서 분석을 몇 번 만들든
+	 * 외부 저장소 호출은 한 번도 늘지 않는다. 무엇을 근거로 삼을지는 이미 저장된 맥락이 정해 두었고,
+	 * 여기서 다시 찾아 나서면 같은 Incident의 두 분석이 서로 다른 코드를 보고 만들어질 수 있다.
+	 * <p>
+	 * 돌려주는 snapshot은 여전히 Incident 사실 쪽이다. 코드 맥락은 이미 별도의 기록으로 저장되어 있고,
+	 * 그것을 분석 행에 한 번 더 복사해 두면 언젠가 두 값이 서로 다른 것을 가리킨다.
+	 * @throws IncidentAnalysisUnavailableException 호출에 실패했거나 응답을 분석으로 쓸 수 없을 때
+	 */
+	IncidentAnalysisResult analyzeWithCode(IncidentAnalysisFacts facts, GitHubCodeContext code);
 
 }

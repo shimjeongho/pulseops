@@ -29,8 +29,11 @@ import java.util.List;
  * 있어 오히려 읽으면 안 된다. 연관을 두면 조회마다 Incident를 함께 끌고 오거나 지연 로딩 경계를 신경
  * 써야 하는데, 얻는 것이 없다. 없는 Incident를 가리킬 수 없다는 것은 DB의 FK가 지킨다.
  * <p>
- * Schema는 Flyway가 관리한다. Incident당 성공한 분석이 하나뿐인 것은 {@code incident_id}의 UNIQUE가
- * 최종적으로 보장한다.
+ * Incident 하나에 종류마다 분석이 하나씩 있을 수 있다. 판정 근거만 본 분석과 GitHub 코드 맥락까지 본
+ * 분석은 서로 다른 것을 보고 만들어졌으므로 한쪽이 다른 쪽을 덮으면 안 된다.
+ * <p>
+ * Schema는 Flyway가 관리한다. 종류마다 성공한 분석이 하나뿐인 것은 {@code (incident_id, analysis_type)}의
+ * UNIQUE가 최종적으로 보장한다.
  */
 @Entity
 @Table(name = "incident_ai_analysis")
@@ -42,6 +45,20 @@ public class IncidentAiAnalysis {
 
 	@Column(name = "incident_id", nullable = false)
 	private Long incidentId;
+
+	/** 이 분석이 무엇을 보고 만들어졌는지이다. 같은 Incident의 두 분석을 가르는 값이다. */
+	@Enumerated(EnumType.STRING)
+	@Column(name = "analysis_type", nullable = false, length = 20)
+	private IncidentAnalysisType analysisType;
+
+	/**
+	 * 코드 기반 분석이 근거로 삼은 GitHub 맥락이다. 판정 근거만 본 분석에는 없다.
+	 * <p>
+	 * 조각을 여기에 복사해 담지 않고 가리키기만 한다. 같은 맥락을 두 곳에 두면 언젠가 두 값이 서로 다른
+	 * 것을 가리키고, 그때 이 분석이 실제로 무엇을 봤는지 답할 수 없게 된다.
+	 */
+	@Column(name = "github_context_id")
+	private Long gitHubContextId;
 
 	/** 설정에 적힌 이름이 아니라 응답이 알려 준, 실제로 이 분석을 만든 model이다. */
 	@Column(name = "model", nullable = false, length = 100)
@@ -92,11 +109,37 @@ public class IncidentAiAnalysis {
 	 * 들어간 기록이 남는다. 값이 계약을 지켰는지는 그 record가 만들어질 때 이미 확인되었으므로 여기서
 	 * 다시 검사하지 않는다.
 	 * <p>
+	 * 종류마다 만드는 자리를 나눈다. 종류를 인자로 받는 하나의 method로 두면 맥락을 가리키는 값이 언제
+	 * 있어야 하고 언제 없어야 하는지가 호출하는 쪽마다 흩어지고, {@code null}을 넘기는 호출이 정상처럼
+	 * 보인다. 이름이 다르면 그 규칙을 부르는 자리에서 틀릴 수 없다.
+	 * <p>
 	 * {@code generatedAt}은 호출자가 넘긴다. 여기서 시계를 읽으면 그 시각을 테스트가 정할 수 없다.
 	 */
-	public static IncidentAiAnalysis of(Long incidentId, IncidentAnalysisResult result, Instant generatedAt) {
+	public static IncidentAiAnalysis incidentOnly(Long incidentId, IncidentAnalysisResult result,
+			Instant generatedAt) {
+		return of(incidentId, IncidentAnalysisType.INCIDENT_ONLY, null, result, generatedAt);
+	}
+
+	/**
+	 * 코드 맥락까지 보고 만든 분석을 기록으로 굳힌다.
+	 * <p>
+	 * 맥락을 가리키는 값을 반드시 받는다. 이 분석의 문장이 인용하는 파일과 commit은 전부 그 맥락 안에
+	 * 있으므로, 어느 맥락이었는지 모르면 나중에 그 인용이 맞았는지 확인할 방법이 없다.
+	 */
+	public static IncidentAiAnalysis gitHubEnriched(Long incidentId, Long gitHubContextId,
+			IncidentAnalysisResult result, Instant generatedAt) {
+		if (gitHubContextId == null) {
+			throw new IllegalArgumentException("코드 기반 분석에는 GitHub 맥락이 있어야 한다");
+		}
+		return of(incidentId, IncidentAnalysisType.GITHUB_ENRICHED, gitHubContextId, result, generatedAt);
+	}
+
+	private static IncidentAiAnalysis of(Long incidentId, IncidentAnalysisType analysisType, Long gitHubContextId,
+			IncidentAnalysisResult result, Instant generatedAt) {
 		IncidentAiAnalysis analysis = new IncidentAiAnalysis();
 		analysis.incidentId = incidentId;
+		analysis.analysisType = analysisType;
+		analysis.gitHubContextId = gitHubContextId;
 		analysis.model = result.model();
 		analysis.promptVersion = result.promptVersion();
 		analysis.inputSnapshot = result.inputSnapshot();
@@ -116,6 +159,14 @@ public class IncidentAiAnalysis {
 
 	public Long getIncidentId() {
 		return this.incidentId;
+	}
+
+	public IncidentAnalysisType getAnalysisType() {
+		return this.analysisType;
+	}
+
+	public Long getGitHubContextId() {
+		return this.gitHubContextId;
 	}
 
 	public String getModel() {

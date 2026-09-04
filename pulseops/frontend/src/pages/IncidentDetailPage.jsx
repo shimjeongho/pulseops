@@ -7,6 +7,7 @@ import { EmptyState } from '../components/EmptyState.jsx'
 import { ErrorMessage } from '../components/ErrorMessage.jsx'
 import { IncidentAcknowledgeAction } from '../components/IncidentAcknowledgeAction.jsx'
 import { IncidentAiAnalysisSection } from '../components/IncidentAiAnalysisSection.jsx'
+import { IncidentCodeAnalysisSection } from '../components/IncidentCodeAnalysisSection.jsx'
 import { IncidentStatusBadge } from '../components/IncidentStatusBadge.jsx'
 import { Loading } from '../components/Loading.jsx'
 import { SeverityBadge } from '../components/SeverityBadge.jsx'
@@ -252,6 +253,12 @@ export function IncidentDetailPage() {
 
       {/* 판정 근거 아래에 둔다. 관측된 사실을 먼저 보여 준 뒤에 그것을 읽은 추론이 와야 한다. */}
       <IncidentAiAnalysisSection incidentId={incidentId} />
+
+      {/*
+        기본 분석 아래에 둔다. 두 분석은 근거가 다르고, 판정 근거만 본 쪽을 먼저 읽어야 코드 맥락을
+        더한 것이 무엇을 바꿨는지 알 수 있다. 기본 분석을 이것으로 대체하지 않는 이유도 같다.
+      */}
+      <IncidentCodeAnalysisSection incidentId={incidentId} />
     </>
   )
 }
