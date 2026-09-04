@@ -28,8 +28,14 @@ import tools.jackson.databind.ObjectMapper;
 @Component
 public class TelemetryEventListener {
 
-	/** Phase 2에서 확정한 단일 Telemetry Topic이다. Consumer group은 설정 파일에서 정한다. */
-	static final String TOPIC = "demo-shop.telemetry.api.v1";
+	/**
+	 * Phase 2에서 확정한 단일 Telemetry Topic이다. Consumer group은 설정 파일에서 정한다.
+	 * <p>
+	 * Consumer Lag 조회가 "어느 Topic을 얼마나 뒤처져 읽고 있는가"를 답하려면 이 이름이 필요하다. 그쪽에
+	 * 같은 문자열을 다시 적지 않고 여기를 가리키게 한다. 두 벌이 되면 한쪽만 바뀌었을 때 실제로 소비하는
+	 * Topic과 lag을 세는 Topic이 달라진다.
+	 */
+	public static final String TOPIC = "demo-shop.telemetry.api.v1";
 
 	private static final Logger logger = LoggerFactory.getLogger(TelemetryEventListener.class);
 

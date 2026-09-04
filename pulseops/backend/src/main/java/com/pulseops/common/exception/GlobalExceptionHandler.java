@@ -7,6 +7,7 @@ import com.pulseops.github.IncidentGitHubContextNotFoundException;
 import com.pulseops.github.IncidentGitHubContextUnavailableException;
 import com.pulseops.incident.IncidentAcknowledgeNotAllowedException;
 import com.pulseops.incident.IncidentNotFoundException;
+import com.pulseops.kafka.ConsumerLagUnavailableException;
 import com.pulseops.metric.MetricStoreUnavailableException;
 import com.pulseops.report.DailyIncidentReportNotFoundException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -193,6 +194,27 @@ public class GlobalExceptionHandler {
 				exception.getReason());
 		return build(HttpStatus.SERVICE_UNAVAILABLE, "GITHUB_CONTEXT_UNAVAILABLE",
 				"GitHub 코드 컨텍스트를 현재 사용할 수 없습니다.", request);
+	}
+
+	/**
+	 * 지금은 Kafka Consumer Lag을 조회할 수 없다. Broker에 닿지 못한 경우와 정해진 시간 안에 답을 받지
+	 * 못한 경우, Topic이 아직 없는 경우, 이 구성이 Kafka에 붙지 않는 경우가 모두 여기로 온다. Metric
+	 * 저장소를 읽지 못하는 것과 같은 성격이라 503이다.
+	 * <p>
+	 * 빈 partition 목록과 {@code totalLag=0}으로 답하지 않는다. 그렇게 하면 Broker 장애가 화면에서 가장
+	 * 건강한 상태로 보인다.
+	 * <p>
+	 * message에 Kafka가 돌려준 문장을 담지 않는다. 거기에는 Broker 주소와 내부 요청 이름이 담겨 오고,
+	 * 읽는 사람이 그것으로 할 수 있는 일도 없다. 무엇 때문에 실패했는지는 예외가 들고 온 짧은 고정
+	 * 문자열로 log에만 남긴다.
+	 */
+	@ExceptionHandler(ConsumerLagUnavailableException.class)
+	public ResponseEntity<ErrorResponse> handleConsumerLagUnavailable(ConsumerLagUnavailableException exception,
+			HttpServletRequest request) {
+		logger.warn("Kafka Consumer Lag을 읽지 못했다. path={} reason={}", request.getRequestURI(),
+				exception.getReason());
+		return build(HttpStatus.SERVICE_UNAVAILABLE, "KAFKA_LAG_UNAVAILABLE", "Kafka Consumer Lag을 현재 조회할 수 없습니다.",
+				request);
 	}
 
 	/**
