@@ -1,0 +1,37 @@
+# PulseOps 로컬 관측용 Prometheus 설정이다.
+#
+# Phase 12는 Prometheus와 Grafana를 각각 하나의 container로 직접 띄워 쓴다. 여러 서비스를 한 번에
+# 올리는 구성은 Phase 13의 몫이므로 여기에 만들지 않는다. 실행 방법은 monitoring/README.md에 있다.
+
+global:
+  # 로컬 데모 기준이다. Incident는 10초 Bucket 위에서 판정되므로, 그보다 촘촘하게 긁어야 장애가
+  # 열리고 끝나는 구간이 그래프에서 한 점으로 뭉개지지 않는다.
+  scrape_interval: 5s
+
+  # scrape 간격보다 짧게 둔다. 같으면 한 번 늦어진 scrape가 다음 scrape와 겹친다.
+  #
+  # 4초로 잡을 수 있는 이유는 PulseOps의 metric endpoint가 외부 저장소를 기다리지 않기 때문이다.
+  # Consumer Lag Gauge는 Kafka를 직접 부르지 않고 마지막으로 읽어 둔 값만 내보내며, Incident Gauge는
+  # DB를 읽지 못하면 값을 비우고 곧바로 답한다.
+  scrape_timeout: 4s
+
+  # Rule을 쓰지 않으므로 평가 주기는 의미가 없지만, 비워 두면 Prometheus가 scrape_interval을 그대로
+  # 가져다 쓴다. 나중에 Rule이 생겼을 때 그 값이 우연히 정해지지 않도록 명시한다.
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: pulseops
+    metrics_path: /actuator/prometheus
+
+    static_configs:
+      # PulseOps Backend는 Host에서 8081로 뜬다. Prometheus를 container로 띄우면 그 안의 localhost는
+      # container 자신이므로 Host를 가리키는 이름이 필요하다.
+      #
+      # Prometheus를 container가 아니라 Host의 binary로 직접 실행한다면 이 값을 localhost:8081로
+      # 바꾼다. Linux에서는 container 실행 시
+      # --add-host=host.docker.internal:host-gateway 가 함께 필요하다.
+      - targets: [host.docker.internal:8081]
+        labels:
+          # 이 label은 Application이 아니라 수집 쪽이 붙이는 값이다. 관측 대상이 늘어났을 때 어느
+          # Application의 값인지 구분하려고 둔다.
+          application: pulseops

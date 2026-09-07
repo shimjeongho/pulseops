@@ -41,16 +41,32 @@ public class TelemetryProcessingService {
 
 	private final IncidentDetector incidentDetector;
 
-	public TelemetryProcessingService(MetricRecorder metricRecorder, IncidentDetector incidentDetector) {
+	private final TelemetryMetrics telemetryMetrics;
+
+	public TelemetryProcessingService(MetricRecorder metricRecorder, IncidentDetector incidentDetector,
+			TelemetryMetrics telemetryMetrics) {
 		this.metricRecorder = metricRecorder;
 		this.incidentDetector = incidentDetector;
+		this.telemetryMetrics = telemetryMetrics;
 	}
 
+	/**
+	 * 세는 일은 처리가 끝난 뒤에 한다. 예외는 세고 나서 그대로 다시 던진다. 여기서 붙잡아 두면
+	 * Consumer가 실패를 성공으로 알고 offset을 넘겨, 재시도와 DLT가 받아야 할 Event가 사라진다.
+	 */
 	public void process(TelemetryEvent event) {
-		if (this.metricRecorder.record(event) == MetricRecordOutcome.OUT_OF_WINDOW) {
-			return;
+		MetricRecordOutcome outcome;
+		try {
+			outcome = this.metricRecorder.record(event);
+			if (outcome != MetricRecordOutcome.OUT_OF_WINDOW) {
+				this.incidentDetector.detect(MetricSeries.from(event), Instant.now());
+			}
 		}
-		this.incidentDetector.detect(MetricSeries.from(event), Instant.now());
+		catch (RuntimeException ex) {
+			this.telemetryMetrics.recordFailed();
+			throw ex;
+		}
+		this.telemetryMetrics.recordProcessed(outcome);
 	}
 
 }

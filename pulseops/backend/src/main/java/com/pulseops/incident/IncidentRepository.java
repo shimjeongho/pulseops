@@ -154,6 +154,29 @@ public interface IncidentRepository extends JpaRepository<Incident, Long> {
 	List<Incident> findActive();
 
 	/**
+	 * 처리 중인 Incident를 종류와 심각도로 나눠 센다.
+	 * <p>
+	 * 관측에만 쓴다. 잠그지 않으며 어떤 판정에도 관여하지 않는다. 이 조회의 결과로 Incident를 열거나
+	 * 끝내는 일은 없다.
+	 * <p>
+	 * 처리 중의 정의는 {@link #findActive}와 같아야 한다. 어긋나면 화면에 보이는 Incident 수와 Prometheus가
+	 * 보는 수가 달라지고, 둘 중 어느 쪽이 맞는지 말할 수 없게 된다.
+	 * <p>
+	 * 조합이 하나도 없으면 그 줄이 오지 않는다. 0인 조합을 DB가 만들어 주지는 않으므로, 없는 줄을 0으로
+	 * 읽는 것은 이 결과를 쓰는 쪽의 몫이다.
+	 */
+	@Query("""
+			select new com.pulseops.incident.ActiveIncidentCount(incident.type, incident.severity, count(incident))
+			from Incident incident
+			where incident.status in (
+				com.pulseops.incident.IncidentStatus.OPEN,
+				com.pulseops.incident.IncidentStatus.ACKNOWLEDGED
+			)
+			group by incident.type, incident.severity
+			""")
+	List<ActiveIncidentCount> countActiveByTypeAndSeverity();
+
+	/**
 	 * 한 구간 안에서 열린 Incident 수를 센다.
 	 * <p>
 	 * 아래 다섯 조회는 Daily Incident Report의 집계에만 쓰인다. 전부 잠그지 않고 읽기만 하며, 실시간

@@ -197,6 +197,7 @@ public class IncidentDetector {
 			Incident opened = this.incidentRepository
 				.save(Incident.open(type, observed, snapshot, snapshot.windowEnd()));
 			publishChanged(opened, snapshot.windowEnd());
+			publishLifecycle(IncidentLifecycleTransition.OPENED, type, observed);
 			return;
 		}
 		Incident incident = active.get();
@@ -216,6 +217,7 @@ public class IncidentDetector {
 		lockActive(series, type).ifPresent((incident) -> {
 			incident.resolve(resolvedAt);
 			publishChanged(incident, resolvedAt);
+			publishLifecycle(IncidentLifecycleTransition.RESOLVED, type, incident.getSeverity());
 		});
 	}
 
@@ -241,6 +243,21 @@ public class IncidentDetector {
 	 */
 	private void publishChanged(Incident incident, Instant occurredAt) {
 		this.eventPublisher.publishEvent(new IncidentChangedEvent(incident.getId(), occurredAt));
+	}
+
+	/**
+	 * 전이가 일어났다는 사실을 세는 쪽에 알린다. {@link IncidentMetrics}가 commit 이후에 받는다.
+	 * <p>
+	 * {@link IncidentChangedEvent}에 종류와 심각도를 얹어 하나로 합치지 않는다. 그 알림은 화면에게
+	 * "다시 읽어라"만 말하기로 되어 있고, 거기에 상태를 실으면 화면이 REST 조회와 알림 중 어느 쪽을
+	 * 믿을지 정해야 한다. 관측을 위해 그 경계를 흐리는 대신 세기 위한 사실만 담은 Event를 따로 둔다.
+	 * <p>
+	 * 이 호출이 실패하거나 사라져도 판정은 그대로다. Spring의 Event 발행은 이 Transaction 안에서
+	 * 기록될 뿐이고, 세는 일은 commit 이후에 일어난다.
+	 */
+	private void publishLifecycle(IncidentLifecycleTransition transition, IncidentType type,
+			IncidentSeverity severity) {
+		this.eventPublisher.publishEvent(new IncidentLifecycleEvent(transition, type, severity));
 	}
 
 }

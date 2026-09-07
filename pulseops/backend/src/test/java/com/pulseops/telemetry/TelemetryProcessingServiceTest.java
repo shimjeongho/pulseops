@@ -12,6 +12,7 @@ import com.pulseops.incident.IncidentDetector;
 import com.pulseops.metric.MetricRecordOutcome;
 import com.pulseops.metric.MetricRecorder;
 import com.pulseops.metric.MetricSeries;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -35,8 +36,12 @@ class TelemetryProcessingServiceTest {
 
 	private final IncidentDetector incidentDetector = mock(IncidentDetector.class);
 
+	private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+
+	private final TelemetryMetrics telemetryMetrics = new TelemetryMetrics(this.meterRegistry);
+
 	private final TelemetryProcessingService processingService = new TelemetryProcessingService(this.metricRecorder,
-			this.incidentDetector);
+			this.incidentDetector, this.telemetryMetrics);
 
 	/** 판정 대상 계열은 Event가 가리키는 그 계열이어야 한다. 여기서 어긋나면 다른 API의 상태가 움직인다. */
 	@Test
@@ -110,6 +115,53 @@ class TelemetryProcessingServiceTest {
 			.detect(any(), any());
 
 		assertThatIllegalStateException().isThrownBy(() -> this.processingService.process(event()));
+	}
+
+	/**
+	 * 결과별 Counter는 처리가 실제로 어떻게 끝났는지를 그대로 따라가야 한다. 세는 쪽이 자기만의
+	 * 분류를 만들면 대시보드의 숫자가 Consumer가 한 일과 다른 것을 말하게 된다.
+	 */
+	@Test
+	void countsEachProcessedEventUnderTheOutcomeTheRecorderReported() {
+		givenMetricOutcome(MetricRecordOutcome.APPLIED);
+		this.processingService.process(event());
+		givenMetricOutcome(MetricRecordOutcome.DUPLICATE);
+		this.processingService.process(event());
+		givenMetricOutcome(MetricRecordOutcome.OUT_OF_WINDOW);
+		this.processingService.process(event());
+
+		assertThat(processedCount("applied")).isEqualTo(1.0);
+		assertThat(processedCount("duplicate")).isEqualTo(1.0);
+		assertThat(processedCount("out_of_window")).isEqualTo(1.0);
+		assertThat(failedCount()).isZero();
+	}
+
+	/**
+	 * 실패한 Event를 처리된 것으로도 세면, 재시도 끝에 성공한 Event가 두 번 처리된 것처럼 보인다.
+	 * 세는 일이 예외를 삼키지 않는다는 것도 함께 고정한다.
+	 */
+	@Test
+	void countsAFailureWithoutCountingItAsProcessed() {
+		givenMetricOutcome(MetricRecordOutcome.APPLIED);
+		willThrow(new IllegalStateException("판정 계층의 결함"))
+			.given(this.incidentDetector)
+			.detect(any(), any());
+
+		assertThatIllegalStateException().isThrownBy(() -> this.processingService.process(event()));
+
+		assertThat(failedCount()).isEqualTo(1.0);
+		assertThat(processedCount("applied")).isZero();
+	}
+
+	private double processedCount(String result) {
+		return this.meterRegistry.get(TelemetryMetrics.PROCESSED_COUNTER)
+			.tag(TelemetryMetrics.RESULT_TAG, result)
+			.counter()
+			.count();
+	}
+
+	private double failedCount() {
+		return this.meterRegistry.get(TelemetryMetrics.FAILED_COUNTER).counter().count();
 	}
 
 	private void givenMetricOutcome(MetricRecordOutcome outcome) {

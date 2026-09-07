@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.mock;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -52,12 +53,18 @@ class TelemetryEventListenerTest {
 
 	private final TelemetryProcessingService processingService = mock(TelemetryProcessingService.class);
 
+	private SimpleMeterRegistry meterRegistry;
+
+	private TelemetryMetrics telemetryMetrics;
+
 	private TelemetryEventListener listener;
 
 	@BeforeEach
 	void createListener() {
+		this.meterRegistry = new SimpleMeterRegistry();
+		this.telemetryMetrics = new TelemetryMetrics(this.meterRegistry);
 		this.listener = new TelemetryEventListener(this.objectMapper, new TelemetryEventValidator(),
-				this.processingService);
+				this.processingService, this.telemetryMetrics);
 	}
 
 	@Test
@@ -208,6 +215,29 @@ class TelemetryEventListenerTest {
 		}
 
 		then(this.processingService).shouldHaveNoInteractions();
+	}
+
+	/**
+	 * 계약을 어겨 DLT로 간 Event를 센다. 이 Counter는 재시도 없이 격리된 Event만 세며, 처리 도중
+	 * 실패해 재시도를 받은 Event는 세지 않는다. 두 실패는 운영에서 해야 할 일이 다르다.
+	 */
+	@Test
+	void countsAnEventRejectedByTheContract() {
+		assertThatExceptionOfType(TelemetryEventContractException.class).isThrownBy(() -> consume("{not-json"));
+
+		assertThat(rejectedCount()).isEqualTo(1.0);
+	}
+
+	/** 계약을 지킨 Event는 격리된 것이 아니다. 여기서 함께 세면 정상 처리가 장애로 보인다. */
+	@Test
+	void doesNotCountAnAcceptedEventAsRejected() throws IOException {
+		consume(readCanonicalFixture());
+
+		assertThat(rejectedCount()).isZero();
+	}
+
+	private double rejectedCount() {
+		return this.meterRegistry.get(TelemetryMetrics.REJECTED_COUNTER).counter().count();
 	}
 
 	private void consume(String payload) {

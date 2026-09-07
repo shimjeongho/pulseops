@@ -104,12 +104,17 @@ class IncidentDetectorIntegrationTest {
 	 * 알리는가"이지 "어떻게 보내는가"가 아니기 때문이다. 알림을 받은 뒤 무엇을 하는지는
 	 * {@link IncidentChangedEventListener}의 몫이고 그쪽 테스트가 따로 본다.
 	 * <p>
-	 * 다른 Type의 Event가 섞이면 형변환에서 곧바로 드러난다. 판정이 알리는 것은 Incident 변경 하나뿐이다.
+	 * 판정은 이것 말고 {@link IncidentLifecycleEvent}도 알리지만 여기서는 걸러 낸다. 그쪽은 관측값을 세기
+	 * 위한 것이라 알림의 시점이나 횟수를 이 테스트가 정하지 않으며, 무엇을 세는지는
+	 * {@link IncidentMetricsTest}가 본다.
 	 */
 	private final List<IncidentChangedEvent> announcedChanges = new ArrayList<>();
 
-	private final ApplicationEventPublisher eventPublisher = (event) -> this.announcedChanges
-		.add((IncidentChangedEvent) event);
+	private final ApplicationEventPublisher eventPublisher = (event) -> {
+		if (event instanceof IncidentChangedEvent changed) {
+			this.announcedChanges.add(changed);
+		}
+	};
 
 	@Autowired
 	private DetectionStateRepository detectionStateRepository;

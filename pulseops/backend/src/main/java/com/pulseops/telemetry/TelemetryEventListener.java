@@ -45,11 +45,14 @@ public class TelemetryEventListener {
 
 	private final TelemetryProcessingService processingService;
 
+	private final TelemetryMetrics telemetryMetrics;
+
 	public TelemetryEventListener(ObjectMapper objectMapper, TelemetryEventValidator validator,
-			TelemetryProcessingService processingService) {
+			TelemetryProcessingService processingService, TelemetryMetrics telemetryMetrics) {
 		this.objectMapper = objectMapper;
 		this.validator = validator;
 		this.processingService = processingService;
+		this.telemetryMetrics = telemetryMetrics;
 	}
 
 	@KafkaListener(topics = TOPIC)
@@ -88,8 +91,12 @@ public class TelemetryEventListener {
 	 * <p>
 	 * 던지지 않고 돌려준다. 부르는 쪽에서 {@code throw}가 보여야 그 자리에서 처리가 끝난다는 것이
 	 * 드러나고, compiler도 뒤 문장을 도달할 수 없는 코드로 다룬다.
+	 * <p>
+	 * 세는 것도 여기서 한다. 계약 위반을 알아채는 자리가 이 method 하나뿐이라, 부르는 쪽마다 세면
+	 * 조건이 하나 늘 때 세는 것을 빠뜨릴 수 있다.
 	 */
 	private TelemetryEventContractException contractViolation(ConsumerRecord<String, String> record, String reason) {
+		this.telemetryMetrics.recordRejected();
 		logger.warn("계약을 어긴 Telemetry Event를 DLT로 보낸다. topic={} partition={} offset={} key={} payloadLength={} reason={}",
 				record.topic(), record.partition(), record.offset(), record.key(),
 				(record.value() != null) ? record.value().length() : 0, reason);

@@ -1,0 +1,24 @@
+# Grafana가 기동하면서 읽는 Datasource 정의이다. UI에서 손으로 만들지 않는다. 손으로 만든 Datasource는
+# 그 Grafana의 volume 안에만 있어 다시 띄우면 사라지고, 어떤 설정이었는지 repository에 남지 않는다.
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+
+    # Dashboard JSON이 이 uid로 Datasource를 가리킨다. 고정하지 않으면 Grafana가 임의의 uid를 만들고,
+    # 그러면 같은 Dashboard가 환경마다 다른 Datasource를 찾게 된다.
+    uid: pulseops-prometheus
+
+    access: proxy
+
+    # Grafana를 container로 띄우면 그 안의 localhost는 container 자신이다. Prometheus container가
+    # Host에 9090으로 열어 둔 port를 Host 이름으로 가리킨다.
+    url: http://host.docker.internal:9090
+
+    isDefault: true
+
+    # 이 파일이 유일한 근거가 되게 한다. UI에서 고친 값이 남아 있으면 다시 띄웠을 때 무엇이 적용된
+    # 것인지 파일만 보고 말할 수 없다.
+    editable: false

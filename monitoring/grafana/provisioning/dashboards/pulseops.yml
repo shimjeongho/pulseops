@@ -1,0 +1,21 @@
+# Dashboard를 파일에서 읽어 오게 한다. UI 클릭으로만 만들어진 Dashboard는 repository에 남지 않아
+# 다른 사람이 같은 화면을 다시 만들 수 없다.
+
+apiVersion: 1
+
+providers:
+  - name: PulseOps
+    type: file
+    folder: PulseOps
+
+    # UI에서 지워도 파일이 남아 있는 한 다시 나타난다. 지우는 것은 이 repository에서 지우는 것이다.
+    allowUiUpdates: false
+    disableDeletion: true
+
+    options:
+      # container 안의 경로이다. 실행할 때 monitoring/grafana/dashboards를 여기에 mount한다.
+      path: /var/lib/grafana/dashboards
+
+      # 파일 이름이 아니라 폴더 구조를 Grafana 폴더로 쓰지 않는다. Dashboard가 하나뿐이라 나눌 것이
+      # 없다.
+      foldersFromFilesStructure: false
