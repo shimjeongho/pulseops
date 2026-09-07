@@ -43,6 +43,36 @@ target=http://localhost:8080
 localTarget=true
 ```
 
+## Docker Compose stack을 대상으로
+
+repository 최상위의 `docker compose up -d --build`로 stack을 띄웠다면 Demo Shop Backend가 Host의
+8080에 열려 있으므로 기본값 그대로 쓸 수 있다.
+
+```
+k6 run load-test/k6/baseline.js
+```
+
+장애 시나리오 둘은 Demo Shop에서 장애 주입이 켜져 있어야 한다. Compose에서는 `.env`에 아래를 넣고
+`demo-shop-backend`를 다시 올린다.
+
+```
+DEMO_SHOP_FAULT_INJECTION_ENABLED=true
+```
+
+k6를 Host에 설치하지 않았다면 공식 image로도 실행할 수 있다. 이때는 Compose network 안에서 service
+이름으로 Demo Shop을 부르는데, 그 이름은 로컬 주소가 아니므로 `ALLOW_LOAD_TEST=true`를 함께 지정해야
+한다. script는 고치지 않는다.
+
+```
+docker run --rm --network pulseops_pulseops \
+  -e DEMO_SHOP_BASE_URL=http://demo-shop-backend:8080 \
+  -e ALLOW_LOAD_TEST=true \
+  -v "$(pwd)/load-test/k6:/scripts:ro" \
+  grafana/k6:1.4.0 run /scripts/baseline.js
+```
+
+network 이름은 Compose project 이름에 따라 달라진다. `docker network ls`로 확인한다.
+
 ## 시나리오
 
 ### baseline

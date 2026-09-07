@@ -1,7 +1,7 @@
 # PulseOps 로컬 관측용 Prometheus 설정이다.
 #
-# Phase 12는 Prometheus와 Grafana를 각각 하나의 container로 직접 띄워 쓴다. 여러 서비스를 한 번에
-# 올리는 구성은 Phase 13의 몫이므로 여기에 만들지 않는다. 실행 방법은 monitoring/README.md에 있다.
+# Prometheus는 repository 최상위의 docker-compose.yml이 띄운다. 이 파일은 그 container 안으로
+# 그대로 mount되며, Prometheus 설정의 근거는 여기 하나뿐이다. 실행 방법은 monitoring/README.md에 있다.
 
 global:
   # 로컬 데모 기준이다. Incident는 10초 Bucket 위에서 판정되므로, 그보다 촘촘하게 긁어야 장애가
@@ -24,13 +24,16 @@ scrape_configs:
     metrics_path: /actuator/prometheus
 
     static_configs:
-      # PulseOps Backend는 Host에서 8081로 뜬다. Prometheus를 container로 띄우면 그 안의 localhost는
-      # container 자신이므로 Host를 가리키는 이름이 필요하다.
+      # Compose network 안의 service 이름이다. Prometheus와 PulseOps Backend가 같은 network에 있어
+      # Docker의 내장 DNS가 이 이름을 Container 주소로 풀어 준다. Host를 거치지 않으므로
+      # host.docker.internal도, port 공개도 필요하지 않다.
       #
-      # Prometheus를 container가 아니라 Host의 binary로 직접 실행한다면 이 값을 localhost:8081로
-      # 바꾼다. Linux에서는 container 실행 시
+      # port는 Container 안에서 PulseOps가 여는 8081이다. Host로 내보낸 port와는 상관이 없다.
+      #
+      # PulseOps Backend를 Compose가 아니라 Host에서 직접 실행하고 Prometheus만 container로 띄운다면
+      # 이 값을 host.docker.internal:8081로 바꾼다. Linux에서는 그 container 실행 시
       # --add-host=host.docker.internal:host-gateway 가 함께 필요하다.
-      - targets: [host.docker.internal:8081]
+      - targets: [pulseops-backend:8081]
         labels:
           # 이 label은 Application이 아니라 수집 쪽이 붙이는 값이다. 관측 대상이 늘어났을 때 어느
           # Application의 값인지 구분하려고 둔다.

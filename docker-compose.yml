@@ -1,0 +1,301 @@
+# PulseOps 전체 stack을 로컬에서 한 번에 띄운다.
+#
+# 이 파일은 로컬 데모와 검증을 위한 것이다. 운영 배포 구성이 아니며 credential, 자원 한도, 이중화,
+# 인증 계층 어느 것도 운영을 전제로 정해져 있지 않다. 자세한 설명은 README.md에 있다.
+#
+# 이름을 고정해 두면 어느 폴더에서 실행하든 같은 project에 속한다. Compose는 이 이름으로 network와
+# volume의 앞자리를 만들기 때문에, 이름이 흔들리면 같은 명령이 매번 다른 volume을 가리킨다.
+name: pulseops
+
+services:
+
+  # --- Infrastructure -------------------------------------------------------
+
+  mysql:
+    image: mysql:8.4.11
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      # 초기화 script가 읽는 값이다. Application에 넘기는 값과 같은 자리에서 정해야 두 쪽이 어긋나지
+      # 않는다.
+      DEMO_SHOP_DB_NAME: ${DEMO_SHOP_DB_NAME:-demoshop}
+      DEMO_SHOP_DB_USER: ${DEMO_SHOP_DB_USER:-demoshop}
+      DEMO_SHOP_DB_PASSWORD: ${DEMO_SHOP_DB_PASSWORD:-demoshop}
+      PULSEOPS_DB_NAME: ${PULSEOPS_DB_NAME:-pulseops}
+      PULSEOPS_DB_USER: ${PULSEOPS_DB_USER:-pulseops}
+      PULSEOPS_DB_PASSWORD: ${PULSEOPS_DB_PASSWORD:-pulseops}
+    volumes:
+      - mysql-data:/var/lib/mysql
+      # entrypoint가 첫 기동에서만 실행하는 자리이다. database와 계정을 만들 뿐 table은 만들지 않는다.
+      - ./infra/docker/mysql/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # $$는 Compose가 아니라 Container 안의 shell이 풀도록 남겨 두는 표시이다. 이렇게 해야 password가
+      # docker compose config 출력에 그대로 찍히지 않는다.
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    networks: [pulseops]
+
+  redis:
+    image: redis:8.4.2-alpine
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+    networks: [pulseops]
+
+  kafka:
+    image: apache/kafka:4.0.0
+    environment:
+      # Zookeeper 없이 Broker와 Controller를 한 Process에서 돌리는 KRaft 구성이다. 단일 Broker
+      # 개발 환경이므로 Controller를 따로 두지 않는다.
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      # Client가 실제로 접속할 주소이다. Broker는 metadata 응답에 이 값을 실어 보내므로, Compose
+      # network 안에서 풀리는 이름이어야 한다. Host에는 Kafka를 열지 않는다.
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      # 단일 Broker에서 첫 Consumer가 붙자마자 group을 열게 한다. 기본값은 다른 Consumer를 기다리며
+      # 시작을 늦추는데, 여기에는 group마다 Consumer가 하나뿐이다.
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # Topic을 자동으로 만들지 않는다. 자동 생성은 Broker 기본 partition 수를 쓰기 때문에, 어느
+      # Application이 먼저 붙느냐에 따라 partition 수가 달라질 수 있다. 필요한 Topic은 kafka-init이
+      # 미리 만든다.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      # Process가 살아 있는지가 아니라 Broker가 실제로 요청에 답하는지를 본다. Kafka는 Process가 뜬
+      # 뒤에도 Metadata를 갖추기까지 시간이 걸리고, 그 사이에 붙은 Client는 연결에 실패한다.
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server 127.0.0.1:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+    networks: [pulseops]
+
+  kafka-init:
+    image: apache/kafka:4.0.0
+    depends_on:
+      kafka:
+        condition: service_healthy
+    # 한 번 실행하고 끝나는 service이다. 두 Application 모두 KafkaAdmin으로 자기 Topic을 선언하므로
+    # 이것이 없어도 결국 만들어지지만, 그러면 어느 Application이 먼저 뜨느냐가 Topic이 언제 생기는지를
+    # 정하게 된다. 특히 PulseOps는 Telemetry Topic을 선언하지 않으므로, 먼저 뜨면 Topic이 생길 때까지
+    # 없는 Topic을 구독한 채로 기다린다. 미리 만들어 두면 두 Application이 어떤 순서로 떠도 같은
+    # Topic 위에서 시작한다.
+    #
+    # partition 3과 replication factor 1은 Application이 선언한 값과 같다. 다르게 만들면 뒤늦게 뜬
+    # Application의 KafkaAdmin이 partition을 늘리거나 경고를 남긴다.
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
+          --topic demo-shop.telemetry.api.v1 --partitions 3 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
+          --topic demo-shop.telemetry.api.v1.dlt --partitions 3 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list
+    networks: [pulseops]
+
+  # --- Application ----------------------------------------------------------
+
+  demo-shop-backend:
+    build:
+      context: ./demo-shop/backend
+    depends_on:
+      mysql:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    environment:
+      # Container hostname과 credential을 image 안에 굽지 않는다. application.properties의 값은
+      # Host에서 직접 실행할 때의 기본값이고, 여기서는 환경 변수로 덮어쓴다.
+      SPRING_DATASOURCE_URL: "jdbc:mysql://mysql:3306/${DEMO_SHOP_DB_NAME:-demoshop}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&characterEncoding=UTF-8"
+      SPRING_DATASOURCE_USERNAME: ${DEMO_SHOP_DB_USER:-demoshop}
+      SPRING_DATASOURCE_PASSWORD: ${DEMO_SHOP_DB_PASSWORD:-demoshop}
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      # 기본은 꺼짐이다. Demo에서 장애를 재현할 때만 .env나 실행 환경에서 true로 바꾼다.
+      DEMO_SHOP_FAULT_INJECTION_ENABLED: ${DEMO_SHOP_FAULT_INJECTION_ENABLED:-false}
+    ports:
+      - "8080:8080"
+    healthcheck:
+      # /api 아래를 부르지 않는다. TelemetryFilter는 /api로 시작하는 요청만 관측하므로, 여기서
+      # /api/products를 부르면 아무도 쓰지 않는 Demo Shop이 계속 요청을 받고 있는 것처럼 Metric에
+      # 남는다. 관측 대상에 관측을 위한 트래픽을 섞지 않는다.
+      #
+      # 응답 내용은 보지 않고 답이 왔는지만 본다. Spring Boot는 Flyway migration과 Entity 검증을 모두
+      # 마친 뒤에야 port를 열기 때문에, HTTP 응답이 온다는 것은 기동이 끝났다는 뜻이다. curl은 -f가
+      # 없으면 404에도 0으로 끝나고 연결되지 않을 때만 실패한다.
+      test: ["CMD-SHELL", "curl -sS -o /dev/null --max-time 3 http://127.0.0.1:8080/"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    networks: [pulseops]
+
+  demo-shop-frontend:
+    build:
+      context: ./demo-shop/frontend
+    depends_on:
+      demo-shop-backend:
+        condition: service_healthy
+    ports:
+      # Host에서는 Dev Server와 같은 자리에서 열린다. Container 안에서는 nginx가 80을 쓴다.
+      - "5173:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    networks: [pulseops]
+
+  pulseops-backend:
+    build:
+      context: ./pulseops/backend
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    environment:
+      SPRING_DATASOURCE_URL: "jdbc:mysql://mysql:3306/${PULSEOPS_DB_NAME:-pulseops}?useSSL=false&allowPublicKeyRetrieval=true&connectionTimeZone=UTC"
+      SPRING_DATASOURCE_USERNAME: ${PULSEOPS_DB_USER:-pulseops}
+      SPRING_DATASOURCE_PASSWORD: ${PULSEOPS_DB_PASSWORD:-pulseops}
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: "6379"
+      # AI 분석과 GitHub 코드 수집은 기본이 꺼짐이다. credential 없이도 나머지 기능은 전부 동작하며,
+      # 값을 주지 않으면 이 Application은 외부로 아무 요청도 보내지 않는다.
+      PULSEOPS_AI_CLAUDE_ENABLED: ${PULSEOPS_AI_CLAUDE_ENABLED:-false}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_MODEL: ${CLAUDE_MODEL:-}
+      PULSEOPS_GITHUB_ENABLED: ${PULSEOPS_GITHUB_ENABLED:-false}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      GITHUB_OWNER: ${GITHUB_OWNER:-}
+      GITHUB_REPOSITORY: ${GITHUB_REPOSITORY:-}
+      GITHUB_REF: ${GITHUB_REF:-main}
+    ports:
+      - "8081:8081"
+    healthcheck:
+      # Actuator의 health를 그대로 쓴다. 여기에는 MySQL과 Redis 연결 상태가 함께 들어가므로, 이
+      # Container가 healthy라는 것은 Process가 떴다는 뜻이 아니라 의존하는 저장소까지 닿는다는 뜻이다.
+      test: ["CMD-SHELL", "curl -sSf --max-time 3 http://127.0.0.1:8081/actuator/health >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    networks: [pulseops]
+
+  pulseops-frontend:
+    build:
+      context: ./pulseops/frontend
+    depends_on:
+      pulseops-backend:
+        condition: service_healthy
+    ports:
+      - "5174:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    networks: [pulseops]
+
+  # --- Observability --------------------------------------------------------
+
+  prometheus:
+    image: prom/prometheus:v3.6.0
+    depends_on:
+      pulseops-backend:
+        condition: service_healthy
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    healthcheck:
+      # 살아 있는지 묻는 일은 Prometheus가 직접 주는 도구로 한다.
+      test: ["CMD", "/bin/promtool", "check", "healthy", "--url=http://127.0.0.1:9090"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    networks: [pulseops]
+
+  grafana:
+    image: grafana/grafana:12.2.0
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    environment:
+      # 로컬 데모라 로그인 없이 화면을 열 수 있게 한다. 설정을 바꾸려면 여전히 로그인해야 한다.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+    volumes:
+      # Datasource와 Dashboard의 근거는 이 파일들이다. 읽기 전용으로 넣어 Container 안에서 고칠 수
+      # 없게 한다.
+      #
+      # dashboards는 grafana-data volume 안쪽 경로에 겹쳐 올린다. 경로를 옮기지 않는 이유는
+      # provisioning 파일이 이미 /var/lib/grafana/dashboards를 가리키고 있어서이고, Docker는 겹치는
+      # mount를 경로가 깊은 것부터 나중에 붙이므로 volume이 이 bind를 덮지 않는다.
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    networks: [pulseops]
+
+networks:
+  # 모든 service가 한 network에 있으므로 service 이름이 그대로 hostname이 된다. Container끼리는
+  # localhost로 서로를 부를 수 없다. Container 안의 localhost는 언제나 자기 자신이다.
+  pulseops:
+    driver: bridge
+
+volumes:
+  # MySQL: Incident, AI 분석, Daily Report처럼 영구 보존이 목적인 데이터가 들어 있다. 여기가 비면
+  # 지금까지 열린 Incident 이력이 사라진다.
+  mysql-data:
+
+  # Redis: 여기 있는 값은 전부 TTL을 갖는다. Metric은 300초, 중복 방지 Key는 900초이다. 그런데도
+  # 남기는 이유는 중복 방지 Key 때문이다. Consumer는 at-least-once라 재시작 직후 같은 Event를 다시
+  # 받을 수 있고, 그때 Key가 함께 사라졌다면 그 Event가 두 번 집계된다.
+  #
+  # 영구 보존을 위한 것이 아니다. Redis는 어떤 데이터의 유일한 저장소도 아니다.
+  redis-data:
+
+  # Kafka: KRaft cluster의 metadata와 log, 그리고 Consumer group의 offset이 들어 있다. 여기가 비면
+  # PulseOps는 Topic을 처음부터 다시 읽어 이미 집계한 Event를 다시 집계한다.
+  kafka-data:
+
+  # Prometheus: 수집한 시계열이다. 여기가 비면 재시작 이전 구간의 그래프가 사라진다.
+  prometheus-data:
+
+  # Grafana: 로그인 계정과 개인 설정이 들어 있는 내부 database이다. Dashboard와 Datasource는 여기가
+  # 아니라 monitoring/grafana 아래의 파일에서 온다.
+  grafana-data:

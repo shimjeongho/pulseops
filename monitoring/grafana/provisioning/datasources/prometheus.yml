@@ -13,9 +13,12 @@ datasources:
 
     access: proxy
 
-    # Grafana를 container로 띄우면 그 안의 localhost는 container 자신이다. Prometheus container가
-    # Host에 9090으로 열어 둔 port를 Host 이름으로 가리킨다.
-    url: http://host.docker.internal:9090
+    # Compose network 안의 service 이름이다. Grafana와 Prometheus가 같은 network에 있어 Docker의
+    # 내장 DNS가 이 이름을 풀어 준다. access가 proxy이므로 이 주소로 접속하는 것은 브라우저가 아니라
+    # Grafana Server이며, 브라우저가 Prometheus에 직접 닿을 필요는 없다.
+    #
+    # Container 안의 localhost는 언제나 자기 자신이므로 여기에 localhost를 쓸 수 없다.
+    url: http://prometheus:9090
 
     isDefault: true
 

@@ -45,6 +45,24 @@ API 주소를 하드코딩하지 않고 `/api/metrics`처럼 상대 경로로만
 
 Proxy는 Dev Server 설정이므로 `npm run dev`로 실행할 때만 동작한다. Backend가 떠 있지 않으면 화면에 연결 실패 안내가 표시된다.
 
+## Container로 실행
+
+repository 최상위의 `docker-compose.yml`이 이 화면을 nginx Container로 띄운다.
+
+```
+docker compose up -d --build
+```
+
+`http://localhost:5174`에서 열린다. Dev Server가 아니라 `npm run build`가 만든 정적 파일을 nginx가
+주고, `/api` 요청은 `nginx.conf`가 Compose network 안의 `pulseops-backend:8081`로 넘긴다. 브라우저
+입장에서는 Dev Server와 똑같이 단일 Origin이므로 이 코드는 그대로다.
+
+Incident 알림은 응답이 끝나지 않는 SSE라 일반 API와 다른 설정이 필요하다. nginx가 응답을 모아 두면
+알림이 늦게 도착하고, 읽기 대기 시간이 짧으면 멀쩡한 연결을 nginx가 먼저 끊는다. `nginx.conf`에서
+`/api/incidents/stream`만 따로 두어 buffering을 끄고 대기 시간을 Backend가 정한 수명보다 길게 잡는다.
+
+전체 stack 실행은 [../../README.md](../../README.md)에 있다.
+
 ## 갱신 방식
 
 Metric은 지금 이 순간의 상태이므로 5초마다 다시 읽는다. 갱신에 실패해도 마지막으로 받은 값을 지우지 않고, 갱신하지 못했다는 사실만 따로 알린다. 잠깐의 실패로 보고 있던 숫자가 사라지는 것이 조금 낡은 값을 보는 것보다 나쁘기 때문이다.

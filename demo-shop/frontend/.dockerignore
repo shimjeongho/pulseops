@@ -1,0 +1,9 @@
+# node_modules는 image 안에서 npm ci로 새로 설치한다. Host의 것을 그대로 넣으면 Host OS에서 build된
+# native binary가 Container 안으로 들어가고, build 시간도 크게 늘어난다.
+node_modules
+dist
+dist-ssr
+
+.idea/
+.vscode/
+*.log

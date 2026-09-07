@@ -12,7 +12,9 @@ PulseOps Backend :8081
 Prometheus와 Grafana는 검증 도구이지 Application의 일부가 아니다. Backend Gradle dependency도 Frontend
 npm dependency도 아니며, 이 폴더가 없어도 두 Application은 그대로 빌드되고 실행된다.
 
-여러 서비스를 한 번에 올리는 Docker Compose 구성은 여기에 없다. 그것은 Phase 13의 몫이다.
+이 폴더에는 설정 파일만 있다. 두 container를 실제로 띄우는 것은 repository 최상위의
+`docker-compose.yml`이며, 여기 있는 파일들은 그 container 안으로 그대로 mount된다. 설정의 근거는
+언제나 이 폴더의 파일이다.
 
 ## 무엇이 노출되는가
 
@@ -70,72 +72,47 @@ Consumer Lag은 조금 다르다. Prometheus가 긁을 때 Kafka를 직접 부�
 
 ## 실행
 
-### 요구 환경
-
-- PulseOps Backend가 8081에서 실행 중이어야 한다.
-- Docker가 필요하다. Prometheus와 Grafana를 각각 container 하나로 직접 띄운다.
-- 9090과 3000이 비어 있어야 한다. 이미 쓰고 있다면 아래 `-p` 앞자리를 바꾸고 Datasource의 port도 함께
-  바꾼다.
-
-먼저 metric이 실제로 나오는지 확인한다.
+Prometheus와 Grafana는 repository 최상위의 `docker-compose.yml`이 함께 띄운다. 따로 실행할 것은 없다.
 
 ```
-curl -s http://localhost:8081/actuator/prometheus | head
+docker compose up -d
 ```
 
-### Prometheus
+전체 stack의 실행과 종료, volume은 [../README.md](../README.md)에 있다.
 
-```
-docker run -d --name phase12-prometheus \
-  -p 9090:9090 \
-  -v "$(pwd)/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro" \
-  prom/prometheus:v3.6.0
-```
+### 무엇이 어떻게 이어지는가
 
-repository 최상위에서 실행한다. 경로가 `$(pwd)` 기준이다.
+세 container가 같은 Compose network에 있으므로 서로를 service 이름으로 부른다.
 
-target이 올라왔는지 확인한다.
+| 어디서 | 어디로 | 무엇으로 |
+| --- | --- | --- |
+| Prometheus | `pulseops-backend:8081` | `prometheus.yml`의 scrape target |
+| Grafana | `prometheus:9090` | Datasource provisioning의 url |
+
+Container 안의 `localhost`는 언제나 자기 자신이라 여기에 쓸 수 없다. Host를 거치지 않으므로
+`host.docker.internal`도 필요 없고, PulseOps Backend의 port를 Host에 열지 않아도 scrape가 된다.
+
+### 확인
+
+target이 올라왔는지 본다.
 
 ```
 curl -s http://localhost:9090/api/v1/targets | grep -o '"health":"[a-z]*"'
 ```
 
-### Grafana
-
-```
-docker run -d --name phase12-grafana \
-  -p 3000:3000 \
-  -e GF_AUTH_ANONYMOUS_ENABLED=true \
-  -e GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer \
-  -v "$(pwd)/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro" \
-  -v "$(pwd)/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro" \
-  grafana/grafana:12.2.0
-```
-
 `http://localhost:3000`에서 PulseOps 폴더의 **PulseOps Overview**를 연다.
 
-익명 열람을 켜 두는 것은 이 구성이 로컬 데모이고 로그인 화면이 확인을 늦추기 때문이다. 관리자 계정의
-기본 비밀번호는 그대로 두지 않는다. 설정을 바꾸려면 로그인해야 하며 `admin/admin`이 기본값이다.
+익명 열람을 켜 두는 것은 이 구성이 로컬 데모이고 로그인 화면이 확인을 늦추기 때문이다. 설정을 바꾸려면
+로그인해야 하며 관리자 계정은 `admin`이다. 비밀번호 기본값은 `admin`이고 `.env`의
+`GRAFANA_ADMIN_PASSWORD`로 바꾼다.
 
-### Linux에서
+### PulseOps Backend만 Host에서 실행할 때
 
-`host.docker.internal`은 Docker Desktop이 만들어 주는 이름이다. Linux에서는 두 `docker run`에 아래를
-붙인다.
+Backend를 Container가 아니라 Host에서 직접 띄워 두고 관측만 붙이고 싶다면 두 곳을 바꾼다.
 
-```
---add-host=host.docker.internal:host-gateway
-```
-
-Prometheus를 container가 아니라 Host의 binary로 직접 실행한다면 `prometheus.yml`의 target을
-`localhost:8081`로 바꾼다.
-
-### 정리
-
-```
-docker rm -f phase12-prometheus phase12-grafana
-```
-
-이름으로 지운다. `docker system prune`처럼 다른 사람의 container까지 함께 지우는 명령은 쓰지 않는다.
+- `prometheus.yml`의 target을 `host.docker.internal:8081`로 바꾼다.
+- Linux에서는 `host.docker.internal`이 없으므로 Prometheus service에
+  `extra_hosts: ["host.docker.internal:host-gateway"]`를 더한다.
 
 ## 설정을 UI에서 만들지 않는 이유
 
@@ -148,5 +125,6 @@ Datasource와 Dashboard는 모두 이 폴더의 파일에서 온다. Grafana UI�
 여기서 보는 숫자는 로컬 데모 환경의 관측값이다. 처리 가능한 최대 요청 수도, 운영 환경의 용량도,
 어떤 SLA도 뜻하지 않는다.
 
-HTTP 패널은 PulseOps 자신이 받은 요청을 보여 준다. 관측 대상인 Demo Shop은 Phase 12의 scrape 대상이
-아니므로, k6가 Demo Shop에 건 부하는 이 패널이 아니라 Telemetry와 Incident 패널에서 드러난다.
+HTTP 패널은 PulseOps 자신이 받은 요청을 보여 준다. 관측 대상인 Demo Shop은 Prometheus의 scrape
+대상이 아니므로, k6가 Demo Shop에 건 부하는 이 패널이 아니라 Telemetry와 Incident 패널에서 드러난다.
+Demo Shop의 상태는 Prometheus가 아니라 Telemetry Event를 거쳐 PulseOps에 도착한다.

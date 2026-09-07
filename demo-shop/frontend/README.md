@@ -64,3 +64,19 @@ java -jar demo-shop-backend.jar --demo-shop.fault-injection.enabled=true
 `vite.config.js`에서 `/api` 요청을 `http://localhost:8080`으로 Proxy하므로 브라우저 입장에서는 단일 Origin이며, 백엔드에 별도의 CORS 설정이 필요 없다.
 
 Proxy는 Dev Server 설정이므로 `npm run dev`로 실행할 때만 동작한다. 백엔드가 떠 있지 않으면 화면에 연결 실패 안내가 표시된다.
+
+## Container로 실행
+
+repository 최상위의 `docker-compose.yml`이 이 화면을 nginx Container로 띄운다.
+
+```
+docker compose up -d --build
+```
+
+`http://localhost:5173`에서 열린다. Dev Server가 아니라 `npm run build`가 만든 정적 파일을 nginx가
+주고, `/api` 요청은 `nginx.conf`가 Compose network 안의 `demo-shop-backend:8080`으로 넘긴다. 브라우저
+입장에서는 Dev Server와 똑같이 단일 Origin이므로 이 코드는 그대로다.
+
+`/dev/faults`는 Production build에 포함되지 않으므로 이 Container에서는 열리지 않는다.
+
+전체 stack 실행은 [../../README.md](../../README.md)에 있다.

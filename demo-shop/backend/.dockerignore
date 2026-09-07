@@ -1,0 +1,12 @@
+# build 산출물과 Gradle 작업 폴더는 image에 필요 없고, Host의 것이 섞여 들어가면 build가 재현되지
+# 않는다. jar는 언제나 builder stage 안에서 새로 만든다.
+build/
+.gradle/
+bin/
+out/
+
+.idea/
+.vscode/
+*.iml
+*.log
+HELP.md

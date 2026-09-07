@@ -1,0 +1,5 @@
+# Compose가 읽는 실제 설정 파일이다. Claude API key와 GitHub token이 들어갈 수 있는 자리이므로
+# repository에 넣지 않는다. 한 번 들어가면 history에서 지울 수 없다.
+#
+# 어떤 이름을 쓸 수 있는지는 .env.example이 보여 준다.
+.env
