@@ -1,7 +1,7 @@
 import http from 'k6/http'
 import { check } from 'k6'
 import { Rate } from 'k6/metrics'
-import { PRODUCTS_URL, guardTarget } from './lib/common.js'
+import { PRODUCTS_URL, SUMMARY_TREND_STATS, guardTarget } from './lib/common.js'
 
 /**
  * 모든 요청에 503을 주입해 ERROR_RATE Incident가 실제로 열리는지 확인한다.
@@ -40,6 +40,8 @@ export const options = {
       maxVUs: 40,
     },
   },
+  /** 출력에만 관여한다. 부하와 threshold는 그대로이다. */
+  summaryTrendStats: SUMMARY_TREND_STATS,
   thresholds: {
     /**
      * 503이 100%인 시험이다. 그래서 http_req_failed에 기준을 걸지 않는다. 걸면 의도대로 동작한 시험이

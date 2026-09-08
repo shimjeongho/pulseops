@@ -45,3 +45,14 @@ export function guardTarget() {
     )
   }
 }
+
+/**
+ * summary에 출력할 Trend 통계이다.
+ *
+ * k6의 기본값은 avg, min, med, max, p(90), p(95)까지라 p(99)가 빠진다. 응답 시간의 꼬리는 평균이
+ * 아니라 상위 분위수에서 드러나고, PulseOps의 LATENCY 판정도 P95를 쓰므로 그 위 한 칸을 함께 봐야
+ * 기준선 부근에서 무슨 일이 일어나는지 말할 수 있다.
+ *
+ * 출력에만 관여한다. 부하의 속도도 threshold의 기준도 이 값이 정하지 않는다.
+ */
+export const SUMMARY_TREND_STATS = ['avg', 'min', 'med', 'max', 'p(90)', 'p(95)', 'p(99)']

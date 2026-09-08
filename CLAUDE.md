@@ -559,3 +559,78 @@ Test Helper가 테스트의 의미를 숨기지 않아야 한다.
 - 영어 설명형 주석을 새로 작성하지 않았는가
 - 현재 Phase 이후 기능을 선행 구현하지 않았는가
 - 기존 Test / Build / Lint를 깨뜨리지 않았는가
+
+---
+
+## 17. Project Status
+
+Phase 1~14가 완료되었다. 1절이 정의한 목표 기술 스택은 모두 도입되었다.
+
+Phase 번호와 기능의 대응은 **코드 주석과 commit message에 남은 것만** 아래에 적는다. Phase
+roadmap 문서는 repository에 없으므로, 여기 없는 번호는 추측하지 않는다.
+
+| Phase | 기능 | 근거 |
+| --- | --- | --- |
+| 1 | Demo Shop core (Product, Order, Payment) | commit `7807655`, `PaymentApiIntegrationTest` |
+| 2 | Telemetry Event v1 계약, Kafka Producer / Consumer | `TelemetryPublisher`, `TelemetryEventListener`, `TelemetryEventValidator`, `MetricSeries`, `application.properties` |
+| 3 | Redis Rolling Metric, 중복 방지, Metric 계약 확정 | commit `ee8d301`, `RedisMetricStore`, `MetricRecorder`, `IncidentRule` |
+| 4 | Incident 탐지 엔진, DetectionState, MySQL 영속성 | `IncidentDetector`, `IncidentActiveUniquenessIntegrationTest` |
+| 5 | PulseOps Web 기반 | `PulseOpsBackendApplicationTests` |
+| 6 | Kafka 계약 위반 처리와 DLT | `TelemetryConsumerConfiguration`, `TelemetryEventListener` |
+| 7 | 처리 멱등성과 재시도 | `TelemetryProcessingService`, `TelemetryConsumerReliabilityIntegrationTest` |
+| 9 | Claude AI 분석, GitHub 코드 컨텍스트 | `IncidentGitHubContext*`, `IncidentAiAnalysisMigrationIntegrationTest` |
+| 11 | Kafka Consumer Lag 관측 | `ConsumerLagMetrics`, `ConsumerLagMetricsTest` |
+| 12 | Prometheus / Grafana 관측 환경 | `IncidentLifecycleTransition`, `PrometheusEndpointIntegrationTest` |
+| 13 | Docker Compose, GitHub Actions CI | commit `32338b0` |
+| 14 | 성능 검증, 문서화, capability boundary 확정 | `docs/` |
+
+Phase 8과 10은 repository 안에 번호를 명시한 근거가 없다. 해당 구간의 commit은 Incident 조회 API,
+ACK 동시성, SSE, Dashboard Frontend, Fault Injection, Daily Report Scheduler이며 모두 구현되어 있다.
+
+Phase 15는 정의되어 있지 않다. 새로운 기능을 요청받기 전까지 선행 구현하지 않는다.
+
+### 현재 Project Boundary
+
+이 프로젝트가 **하는 것**은 위에 적힌 것이 전부이다. 아래는 **하지 않는다.**
+
+- 배포(CD), registry publish, Kubernetes, cloud 배포
+- 인증/인가 계층
+- 이중화, autoscaling, 자원 한도, backup
+- OpenTelemetry, distributed tracing, Loki, ELK, Alertmanager
+- AI를 이용한 장애 탐지 또는 자동 복구
+
+14절 Forbidden Changes가 계속 유효하다.
+
+### Capability Boundary
+
+프로젝트를 설명할 때 지켜야 할 경계이다. 근거는 `docs/performance.md`의 실측 결과이다.
+
+**말할 수 있다**
+
+- 로컬 Docker Compose 환경에서 정해진 속도의 부하를 보냈을 때 관측 경로 전체가 동작한다
+- Kafka에 publish된 record에 대해 Consumer 처리는 at-least-once이며 Redis dedup이 중복 반영을 막는다
+- ERROR_RATE / LATENCY Incident가 의도한 장애에서 열리고 정상 트래픽 복귀 시 종료된다
+- 두 종류의 Incident는 독립이며 지연이 오류로 세어지지 않는다
+
+**말할 수 없다**
+
+- 최대 처리량(TPS), 운영 환경 용량, SLA
+- production ready, high availability, fault tolerant, zero downtime
+- end-to-end exactly-once, guaranteed delivery
+- AI가 장애를 탐지하거나 root cause를 확정한다는 표현
+
+### 문서 지도
+
+| 문서 | 내용 |
+| --- | --- |
+| `README.md` | 포트폴리오 진입점 |
+| `docs/architecture.md` | 전체 구조와 경로별 diagram |
+| `docs/incident-detection.md` | 판정 기준선과 생명주기 |
+| `docs/reliability.md` | 전달 semantics와 failure boundary |
+| `docs/ai-github-boundary.md` | AI / GitHub의 역할과 금지 표현 |
+| `docs/performance.md` | 부하 검증 실측 결과 |
+| `docs/demo-guide.md` | 실습 절차 |
+| `docs/troubleshooting.md` | 문제 진단 |
+| `docs/portfolio.md` | 설계 결정의 근거 |
+
+문서와 코드가 어긋나면 **코드가 authoritative source**이다. 문서를 코드에 맞춘다.

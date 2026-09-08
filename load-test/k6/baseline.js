@@ -1,6 +1,6 @@
 import http from 'k6/http'
 import { check } from 'k6'
-import { PRODUCTS_URL, guardTarget } from './lib/common.js'
+import { PRODUCTS_URL, SUMMARY_TREND_STATS, guardTarget } from './lib/common.js'
 
 /**
  * 장애 없이 정상 요청만 흘려보낸다.
@@ -38,6 +38,8 @@ export const options = {
       ],
     },
   },
+  /** 출력에만 관여한다. 부하와 threshold는 그대로이다. */
+  summaryTrendStats: SUMMARY_TREND_STATS,
   thresholds: {
     /** 정상 트래픽이므로 실패는 사실상 0이어야 한다. */
     http_req_failed: ['rate<0.01'],

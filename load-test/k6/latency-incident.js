@@ -1,7 +1,7 @@
 import http from 'k6/http'
 import { check } from 'k6'
 import { Rate } from 'k6/metrics'
-import { PRODUCTS_URL, guardTarget } from './lib/common.js'
+import { PRODUCTS_URL, SUMMARY_TREND_STATS, guardTarget } from './lib/common.js'
 
 /**
  * 모든 요청을 3.5초 지연시켜 LATENCY Incident가 실제로 열리는지 확인한다.
@@ -43,6 +43,8 @@ export const options = {
       maxVUs: 60,
     },
   },
+  /** 출력에만 관여한다. 부하와 threshold는 그대로이다. */
+  summaryTrendStats: SUMMARY_TREND_STATS,
   thresholds: {
     /**
      * p(95)에 기준을 걸지 않는다. 3.5초는 이 시험이 만들어 낸 결과이며, 그것을 실패로 보고하면 의도대로
