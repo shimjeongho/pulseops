@@ -30,7 +30,7 @@ docker compose restart <서비스>
 ### 증상
 
 ```
-Error response from daemon: ... failed to bind host port 0.0.0.0:8080: address already in use
+Error response from daemon: ... failed to bind host port 127.0.0.1:8080: address already in use
 ```
 
 ### 진단
@@ -44,7 +44,7 @@ Compose가 Host에 여는 port는 여섯이다.
 | 8080 | demo-shop-backend |
 | 8081 | pulseops-backend |
 | 9090 | prometheus |
-| 3000 | grafana |
+| 3001 | grafana |
 
 무엇이 쓰고 있는지 본다.
 
@@ -346,7 +346,7 @@ curl -s http://localhost:8081/actuator/prometheus | head -5
 ### Datasource가 안 붙는다
 
 ```bash
-curl -s http://localhost:3000/api/datasources/uid/pulseops-prometheus/health
+curl -s http://localhost:3001/api/datasources/uid/pulseops-prometheus/health
 ```
 
 기대: `{"message":"Successfully queried the Prometheus API.","status":"OK"}`
@@ -357,7 +357,7 @@ Datasource는 `http://prometheus:9090`을 본다. **Container 안의 `localhost`
 ### Dashboard가 안 보인다
 
 ```bash
-curl -s "http://localhost:3000/api/search?query=PulseOps"
+curl -s "http://localhost:3001/api/search?query=PulseOps"
 ```
 
 `PulseOps` 폴더와 `PulseOps Overview`(uid `pulseops-overview`)가 나와야 한다.
@@ -420,6 +420,7 @@ curl -N -H "Accept: text/event-stream" http://localhost:8081/api/incidents/strea
 | `connected`도 안 온다 | Backend 문제 |
 | `curl`로는 오는데 브라우저에서만 안 온다 | nginx buffering |
 | 연결이 자꾸 끊긴다 | nginx 읽기 대기 시간이 SSE 수명보다 짧다 |
+| 로컬에서는 오는데 Quick Tunnel 외부 화면에서만 안 온다 | 아래 [Quick Tunnel 외부 경로](#quick-tunnel-외부-경로) |
 
 ### nginx buffering
 
@@ -432,6 +433,20 @@ curl -N -H "Accept: text/event-stream" http://localhost:8081/api/incidents/strea
 
 회사 프록시나 일부 브라우저 확장이 `text/event-stream`을 버퍼링한다. `curl`로는 오는데 브라우저에서만
 안 온다면 이쪽을 의심한다.
+
+### Quick Tunnel 외부 경로
+
+무료 외부 데모(Cloudflare Quick Tunnel)에서는 이 증상이 알려진 제한이다. 외부 경로에서도
+`/api/incidents/stream`은 `200 text/event-stream`으로 연결되지만, Event가 곧바로 오지 않고 연결이 끝날 때
+한꺼번에 도착하는 현상이 실측되었다. 같은 화면을 이 PC에서 열면 `connected`와 `heartbeat`가 곧바로
+온다.
+
+```bash
+curl -N -H "Accept: text/event-stream" http://127.0.0.1:5174/api/incidents/stream
+```
+
+로컬 경로도 같은 nginx와 Backend를 거치므로 위의 nginx buffering 문제가 아니다. Quick Tunnel 경로 안의
+어느 구간에서 생기는지는 확인하지 않았다. 외부 데모에서는 새로고침으로 최신 Incident를 본다.
 
 ## 12. Testcontainers 자원 부족 — 테스트 실패
 

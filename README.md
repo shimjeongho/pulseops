@@ -15,7 +15,9 @@ Record는 재시도 뒤 별도의 DLT로 격리한다.
 | **PulseOps** | 관측자. Event를 읽어 Metric을 만들고 Incident를 열고 닫으며, 화면과 API로 그 상태를 보여 준다 |
 
 이 프로젝트는 **공개 배포된 서비스가 아니다.** 전체 stack을 로컬 Docker Compose로 띄워 확인한다.
-실행 방법은 [Quick Start](#quick-start)에 있다.
+실행 방법은 [Quick Start](#quick-start)에 있다. 무료 외부 데모는 이 PC의 stack을 Cloudflare Quick Tunnel로
+잠시 여는 **조회 전용** 화면이며, 로컬과 달리 Incident 목록이 실시간으로 갱신되지 않는다.
+→ [External Demo](#external-demo-quick-tunnel)
 
 ## Preview
 
@@ -79,7 +81,7 @@ flowchart LR
 
     subgraph obs["Observability"]
         PROM["Prometheus<br/>:9090"]
-        GRAF["Grafana<br/>:3000"]
+        GRAF["Grafana<br/>:3001"]
     end
 
     User --> DSF
@@ -183,14 +185,42 @@ docker compose ps
 | `http://localhost:8081/api/metrics` | Metric API |
 | `http://localhost:8081/api/incidents/active` | 처리 중인 Incident |
 | `http://localhost:9090` | Prometheus |
-| `http://localhost:3000` | Grafana (**PulseOps Overview**) |
+| `http://localhost:3001` | Grafana (**PulseOps Overview**) |
 
 JDK와 Node.js는 Host에 없어도 된다. Container 안에서 build한다. MySQL, Redis, Kafka는 Host에 열리지
-않으므로 이미 떠 있는 다른 MySQL이나 Redis와 부딪히지 않는다. 기본 실행에는 아무 설정도 필요 없고,
-바꿀 것이 있을 때만 `cp .env.example .env`.
+않으므로 이미 떠 있는 다른 MySQL이나 Redis와 부딪히지 않는다. 위 주소는 전부 `127.0.0.1`에만 bind되어
+같은 네트워크의 다른 기기에서는 열리지 않는다. 외부에 보이는 것은 아래 [External Demo](#external-demo-quick-tunnel)
+하나뿐이다. 기본 실행에는 아무 설정도 필요 없고, 바꿀 것이 있을 때만 `cp .env.example .env`.
 
 내릴 때는 `docker compose down`이다. `-v`를 붙이면 volume 5개가 **전부 지워지고 되돌릴 수 없다.**
 Incident 이력, Kafka offset, 중복 방지 Key, Prometheus 시계열이 함께 사라진다.
+
+### External Demo (Quick Tunnel)
+
+별도 도메인이나 유료 서비스 없이, 이 PC에서 실행 중인 stack을 Cloudflare Quick Tunnel로 잠시 외부에
+보여 주는 무료 데모 구성이다. 배포가 아니며 이 PC와 `cloudflared`가 켜져 있는 동안에만 열린다. 외부
+주소(`*.trycloudflare.com`)는 `cloudflared`를 실행할 때마다 새로 발급되므로 여기에 적지 않는다.
+
+```bash
+cloudflared tunnel --url http://127.0.0.1:5174
+```
+
+Tunnel origin은 `http://127.0.0.1:5174`(PulseOps Dashboard의 nginx) **하나**다. Demo Shop, Backend API
+port, Prometheus, Grafana는 외부로 열리지 않는다.
+
+| 외부에서 | 동작 |
+| --- | --- |
+| Dashboard 화면, `GET /api/...` 조회 | 된다 |
+| Metric, Consumer Lag | 화면이 주기적으로 다시 조회(polling)하므로 외부에서도 갱신된다 |
+| 상태 변경 `POST` (예: Incident 확인 처리) | nginx가 `403 READ_ONLY_ACCESS`로 거절한다. 이 PC에서 직접 연 화면의 요청은 그대로 Backend로 간다 |
+| Incident 목록 실시간 갱신 (SSE) | **되지 않는다.** 새 Incident를 보려면 새로고침한다 |
+
+Incident SSE는 로컬(`http://localhost:5174`)에서는 실시간으로 동작한다. `connected`와 20초 간격
+`heartbeat`가 곧바로 도착하고 Incident 목록이 새로고침 없이 바뀐다. Quick Tunnel 외부 경로에서도 같은
+endpoint가 `200 text/event-stream`으로 연결되지만, Event가 곧바로 전달되지 않고 **연결이 끝날 때 한꺼번에
+전달되는 현상이 실측되었다.** 같은 nginx와 Backend를 거치는 로컬 경로에서는 이 현상이 없으므로 PulseOps
+Backend나 nginx의 SSE buffering 문제가 아니라 Quick Tunnel 경로에서 관측된 제한이다. 그 경로 안의 어느
+구간에서 생기는지는 확인하지 않았다. 무료 외부 데모에서는 이 제한을 수용하고 코드로 우회하지 않는다.
 
 ### 장애를 재현해 보기
 
@@ -203,7 +233,7 @@ Incident 이력, Kafka offset, 중복 방지 Key, Prometheus 시계열이 함께
 | `k6 run load-test/k6/latency-incident.js` | 3.5초 지연 주입 → 응답은 200이고 `errorCount`는 0인데 P95만으로 `LATENCY` Incident가 열린다 |
 | `k6 run load-test/k6/baseline.js` | 정상 트래픽 복귀 → 약 30초 뒤 Incident가 `RESOLVED`가 된다 |
 
-Dashboard는 새로고침 없이 바뀐다(SSE). 요청을 그냥 멈추면 Incident는 끝나지 않는다.
+로컬에서 연 Dashboard는 새로고침 없이 바뀐다(SSE). 요청을 그냥 멈추면 Incident는 끝나지 않는다.
 
 **20단계 실습 절차는 [docs/demo-guide.md](docs/demo-guide.md)에 있다.**
 막히면 [docs/troubleshooting.md](docs/troubleshooting.md)를 본다.
@@ -295,8 +325,13 @@ docs/               아래 문서
 **이 프로젝트가 주장하지 않는 것들이다.**
 
 **운영** — production ready가 아니다. 로컬 데모와 검증을 위한 구성이다. 인증/인가 계층이 없다. 모든
-구성 요소가 Instance 하나이고 Kafka Broker도 1개, replication factor도 1이다. 자원 한도, 재시작 정책,
-backup, 이중화가 정해져 있지 않다. 배포(CD)가 없고 image를 registry로 밀지 않는다.
+구성 요소가 Instance 하나이고 Kafka Broker도 1개, replication factor도 1이다. 자원 한도, backup,
+이중화가 정해져 있지 않고, 재시작 정책은 Container 단위 `restart: unless-stopped`뿐이다. 배포(CD)가 없고
+image를 registry로 밀지 않는다.
+
+**외부 데모** — Quick Tunnel 데모는 이 PC가 켜져 있는 동안만 열리는 임시 주소이며 상시 운영이 아니다.
+조회 전용이고 Incident 목록이 실시간으로 갱신되지 않는다. 인증 계층이 없으므로 주소를 아는 누구나
+조회할 수 있다.
 
 **Credential** — Docker Compose에는 로컬 실행 편의를 위한 database와 Grafana의 기본 계정값이 있어
 `.env` 없이도 stack이 뜬다. 운영에서 쓸 값이 아니다. Claude API key와 GitHub token 같은 외부 credential은

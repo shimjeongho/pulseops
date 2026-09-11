@@ -93,7 +93,7 @@ Broker가 실제로 요청에 답하고, Topic이 만들어진 뒤에야 Applica
 | http://localhost:8081/api/reports/daily | Daily Incident Report |
 | http://localhost:8081/actuator/health | PulseOps 상태 |
 | http://localhost:9090 | Prometheus |
-| http://localhost:3000 | Grafana (로그인 없이 조회 가능) |
+| http://localhost:3001 | Grafana (로그인 없이 조회 가능) |
 
 ## 6. Normal Traffic
 
@@ -399,7 +399,7 @@ Redis dedup이 그것을 막았다는 뜻이다.
 
 ## 16. Grafana
 
-http://localhost:3000 을 연다. 로그인 없이 볼 수 있다.
+http://localhost:3001 을 연다. 로그인 없이 볼 수 있다.
 
 **Dashboards → PulseOps 폴더 → PulseOps Overview**
 

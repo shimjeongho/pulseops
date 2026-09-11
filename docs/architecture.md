@@ -31,7 +31,7 @@ flowchart LR
 
     subgraph obs["관측 인프라"]
         PROM["Prometheus :9090"]
-        GRAF["Grafana :3000"]
+        GRAF["Grafana :3001"]
         PROM --> GRAF
     end
 

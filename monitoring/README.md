@@ -6,7 +6,7 @@ PulseOps가 내보내는 metric을 Prometheus로 모으고 Grafana로 보는 로
 PulseOps Backend :8081
   → GET /actuator/prometheus
   → Prometheus :9090
-  → Grafana :3000
+  → Grafana :3001
 ```
 
 Prometheus와 Grafana는 검증 도구이지 Application의 일부가 아니다. Backend Gradle dependency도 Frontend
@@ -100,7 +100,7 @@ target이 올라왔는지 본다.
 curl -s http://localhost:9090/api/v1/targets | grep -o '"health":"[a-z]*"'
 ```
 
-`http://localhost:3000`에서 PulseOps 폴더의 **PulseOps Overview**를 연다.
+`http://localhost:3001`에서 PulseOps 폴더의 **PulseOps Overview**를 연다.
 
 익명 열람을 켜 두는 것은 이 구성이 로컬 데모이고 로그인 화면이 확인을 늦추기 때문이다. 설정을 바꾸려면
 로그인해야 하며 관리자 계정은 `admin`이다. 비밀번호 기본값은 `admin`이고 `.env`의
